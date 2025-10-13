@@ -10,7 +10,7 @@ This script implements structured episodes over a collection of scenes, which
 ask the agent to go to each furniture within the scene and save a RGBD+pose trajectory.
 This trajectory is then used to create a map of the scenes through Concept-Graphs.
 """
-import os
+
 import sys
 
 # append the path of the
@@ -36,20 +36,13 @@ from habitat_llm.agent.env.dataset import CollaborationDatasetV0
 
 # Method to load agent planner from the config
 def run_planner():
-    traj_dir = "/home/oakers1/scratchtshu2/oakers1/partnr-planner/data/trajectories/epidx_0_scene_106366386_174226770/main_agent/rgb"
-    before_count = len(os.listdir(traj_dir))
-    print(f"Trajectory file count before run: {before_count}")
-
     # Setup a seed
     seed = 47668090
 
     # setup required overrides
     DATASET_OVERRIDES = [
-        # "habitat.dataset.data_path=data/datasets/path/to/val/scenes",
         "habitat.dataset.data_path=data/datasets/partnr_episodes/v0_0/val_mini.json.gz",
         "habitat.dataset.scenes_dir=data/hssd-hab/",
-        "habitat.simulator.agents.main_agent.articulated_agent_urdf=/home/oakers1/scratchtshu2/oakers1/partnr-planner/data/robots/hab_spot_arm/urdf/hab_spot_arm.urdf",
-        "habitat.simulator.agents.main_agent.articulated_agent_type=SpotRobot",
     ]
     SENSOR_OVERRIDES = [
         "habitat.simulator.agents.main_agent.sim_sensors.jaw_depth_sensor.normalize_depth=False"
@@ -64,7 +57,9 @@ def run_planner():
         "trajectory.agent_names=[main_agent]",
     ]
 
-    EPISODE_OVERRIDES = ["+episode_indices=[2]"]  # USE FOR VAL SCENES
+    EPISODE_OVERRIDES = [
+        "+episode_indices=[2,87,370,444,515,590,435,390,555,50,452,355]"
+    ]  # USE FOR VAL SCENES
 
     # Setup config
     config_base = get_config(
@@ -89,13 +84,13 @@ def run_planner():
 
     # Initialize the environment interface for the agent
     dataset = CollaborationDatasetV0(config.habitat.dataset)
-    print("xytest", config.episode_indices)
-    print("xytest", len(dataset.episodes))
+    """
     if config.get("episode_indices", None) is not None:
         episode_subset = [dataset.episodes[x] for x in config.episode_indices]
         dataset = CollaborationDatasetV0(
             config=config.habitat.dataset, episodes=episode_subset
         )
+    """
     env_interface = EnvironmentInterface(config, dataset=dataset)
 
     # Instantiate the agent planner
@@ -158,8 +153,8 @@ def run_planner():
                 # Refresh observations
                 observations = env_interface.parse_observations(obs)
                 # Store third person frames for generating video
-                # hl_dict = {0: (hl_action_name, hl_action_input)}
-                # eval_runner._store_for_video(observations, hl_dict)
+                hl_dict = {0: (hl_action_name, hl_action_input)}
+                eval_runner._store_for_video(observations, hl_dict)
 
                 # figure out how to get completion signal
                 if response:
@@ -169,15 +164,9 @@ def run_planner():
                 f"\tCompleted high-level action: {hl_action_name} on {hl_action_input}"
             )
 
-        # if eval_runner.frames:
-        #     eval_runner._make_video(scene_id)
+        if eval_runner.frames:
+            eval_runner._make_video(scene_id)
         processed_scenes.add(str(scene_id))
-
-        after_count = len(os.listdir(traj_dir))
-
-        print(f"Trajectory file count after run: {after_count}")
-        print(f"New files added: {after_count - before_count}")
-
     env_interface.sim.close()
 
 

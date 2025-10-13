@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SCAI Lab Simulation Runner</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 50px; }
+        #status { margin: 20px; font-style: italic; color: #555; }
+        #video-container { margin-top: 30px; }
+        video { border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <h1>Simulation Control Panel</h1>
+    <button id="runButton">Run Simulation</button>
+    <div id="status">Status: Idle</div>
+    <div id="video-container" style="display: none;">
+        <video id="resultVideo" width="800" controls></video>
+    </div>
+
+    <script>
+        const runButton = document.getElementById('runButton');
+        const statusDiv = document.getElementById('status');
+        const videoContainer = document.getElementById('video-container');
+        const resultVideo = document.getElementById('resultVideo');
+        let pollingInterval;
+
+        // Function to check the simulation status from the backend
+        async function checkStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                statusDiv.textContent = `Status: ${data.status}`;
+
+                if (data.status === 'complete') {
+                    console.log("Simulation complete! Video URL:", data.video_url);
+                    resultVideo.src = data.video_url;
+                    videoContainer.style.display = 'block';
+                    runButton.disabled = false;
+                    clearInterval(pollingInterval); // Stop polling
+                } else if (data.status === 'error') {
+                    console.error("Simulation failed.");
+                    runButton.disabled = false;
+                    clearInterval(pollingInterval); // Stop polling
+                }
+            } catch (error) {
+                console.error("Failed to fetch status:", error);
+                statusDiv.textContent = 'Status: Error connecting to server.';
+            }
+        }
+
+        // Event listener for the run button
+        runButton.addEventListener('click', async () => {
+            console.log("Starting simulation...");
+            runButton.disabled = true;
+            statusDiv.textContent = 'Status: Starting...';
+            videoContainer.style.display = 'none';
+
+            try {
+                // Tell the server to start the simulation
+                await fetch('/run-simulation', { method: 'POST' });
+                // Start polling every 3 seconds to check for completion
+                pollingInterval = setInterval(checkStatus, 3000);
+            } catch (error) {
+                console.error("Failed to start simulation:", error);
+                statusDiv.textContent = 'Status: Error starting simulation.';
+                runButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

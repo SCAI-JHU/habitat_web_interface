@@ -1,4 +1,4 @@
-save: False
+save: True
 agent_names: ['agent_0']  # list of all agents to log
 camera_prefixes: ['articulated_agent_jaw']
 save_path: 'data/trajectories/'

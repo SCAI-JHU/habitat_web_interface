@@ -181,10 +181,15 @@ class EnvironmentInterface:
         # set articulated agents for each dynamic world-graph
         articulated_agents = {}
         for agent_uid in self.world_graph:
+            # import ipdb; ipdb.set_trace()
+            if agent_uid == 1:
+                break
             articulated_agents[agent_uid] = self.sim.agents_mgr[
                 agent_uid
             ].articulated_agent
         for agent_id in self.world_graph:
+            if agent_uid == 1:
+                break
             if isinstance(self.world_graph[agent_id], DynamicWorldGraph):
                 self.world_graph[agent_id].set_articulated_agents(articulated_agents)
 
