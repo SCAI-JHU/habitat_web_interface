@@ -71,8 +71,7 @@ async def run_simulation():
             raise Exception("Simulation script failed.")
 
         # --- START OF NEW ROBUST PATH CODE ---
-        trajectories_base_dir = (
-            "/weka/scratch/tshu2/oakers1/partnr-planner/data/trajectories"
+        trajectories_base_dir = ( "/weka/scratch/tshu2/oakers1/partnr-planner/data/trajectories"
         )
 
         all_traj_dirs = [
