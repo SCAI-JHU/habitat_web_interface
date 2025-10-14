@@ -18,23 +18,17 @@ simulation_status = {
 }
 
 # --- Directory and Script Paths ---
-# Make sure these paths are correct for your system.
-WEB_DIR = "web"
+# Get project root directory dynamically
+PROJECT_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Define paths relative to project root
+WEB_DIR = os.path.join(PROJECT_ROOT_DIR, "web")
 OUTPUTS_DIR = os.path.join(WEB_DIR, "outputs")
 SIMULATION_SCRIPT = "habitat_llm/examples/scene_mapping.py"
 VIDEO_SCRIPT = "create_video.py"
 
-# This is the directory where the simulation saves its raw image frames.
-# We'll need to find a way to make this dynamic later, but for now, we'll use the one from your script.
-# IMPORTANT: Update this path to be correct.
-IMAGE_FRAMES_DIR = "/home/oakers1/scratchtshu2/oakers1/partnr-planner/data/trajectories/epidx_0_scene_106366386_174226770/main_agent/rgb"
-
 # Ensure the output directory for videos exists
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
-
-# --- API Endpoints ---
-# --- Add this new variable near the top of your script ---
-PROJECT_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ... (rest of your script) ...
 
@@ -62,8 +56,34 @@ async def run_simulation():
 
     try:
         print(f"Running habitat simulation script: {SIMULATION_SCRIPT}")
+        # Set up environment with GPU device
+        env = os.environ.copy()
+        
+        # Configure GPU devices for cluster environments
+        # You can set these environment variables before starting the server:
+        # export HABITAT_GPU_ID=0
+        # export CUDA_VISIBLE_DEVICES=0
+        # export EGL_DEVICE_ID=0
+        
+        habitat_gpu_id = os.environ.get("HABITAT_GPU_ID", "0")
+        env["HABITAT_GPU_ID"] = habitat_gpu_id
+        
+        if "CUDA_VISIBLE_DEVICES" not in env:
+            # If not set by SLURM, try to use the first GPU
+            env["CUDA_VISIBLE_DEVICES"] = habitat_gpu_id
+        
+        # For headless rendering on clusters, EGL device must match
+        if "EGL_DEVICE_ID" not in env:
+            # Try to match EGL device to the CUDA device
+            env["EGL_DEVICE_ID"] = habitat_gpu_id
+        
+        print(f"GPU Configuration:")
+        print(f"  HABITAT_GPU_ID={env.get('HABITAT_GPU_ID')}")
+        print(f"  CUDA_VISIBLE_DEVICES={env.get('CUDA_VISIBLE_DEVICES')}")
+        print(f"  EGL_DEVICE_ID={env.get('EGL_DEVICE_ID')}")
+        
         sim_process = subprocess.Popen(
-            ["python", SIMULATION_SCRIPT], cwd=PROJECT_ROOT_DIR
+            ["python", SIMULATION_SCRIPT], cwd=PROJECT_ROOT_DIR, env=env
         )
         sim_process.wait()
 
@@ -71,8 +91,8 @@ async def run_simulation():
             raise Exception("Simulation script failed.")
 
         # --- START OF NEW ROBUST PATH CODE ---
-        trajectories_base_dir = ( "/weka/scratch/tshu2/oakers1/partnr-planner/data/trajectories"
-        )
+        # Use dynamic path for trajectories directory
+        trajectories_base_dir = os.path.join(PROJECT_ROOT_DIR, "data/trajectories")
 
         all_traj_dirs = [
             os.path.join(trajectories_base_dir, d)

@@ -36,20 +36,38 @@ from habitat_llm.agent.env.dataset import CollaborationDatasetV0
 
 # Method to load agent planner from the config
 def run_planner():
-    traj_dir = "/home/oakers1/scratchtshu2/oakers1/partnr-planner/data/trajectories/epidx_0_scene_106366386_174226770/main_agent/rgb"
-    before_count = len(os.listdir(traj_dir))
-    print(f"Trajectory file count before run: {before_count}")
+    # Get the project root directory dynamically
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, "../.."))
+    
+    # Use dynamic path for trajectory directory
+    traj_dir = os.path.join(project_root, "data/trajectories/epidx_0_scene_106366386_174226770/main_agent/rgb")
+    if os.path.exists(traj_dir):
+        before_count = len(os.listdir(traj_dir))
+        print(f"Trajectory file count before run: {before_count}")
+    else:
+        before_count = 0
+        print(f"Trajectory directory does not exist yet: {traj_dir}")
 
     # Setup a seed
     seed = 47668090
 
     # setup required overrides
+    # Get GPU device ID from environment variable or use default
+    # When CUDA_VISIBLE_DEVICES is set by SLURM, device 0 refers to the first visible device
+    gpu_device_id = os.environ.get("HABITAT_GPU_ID", "0")
+    print(f"Using GPU device ID: {gpu_device_id}")
+    
+    # Construct robot URDF path dynamically
+    robot_urdf_path = os.path.join(project_root, "data/robots/hab_spot_arm/urdf/hab_spot_arm.urdf")
+    
     DATASET_OVERRIDES = [
         # "habitat.dataset.data_path=data/datasets/path/to/val/scenes",
         "habitat.dataset.data_path=data/datasets/partnr_episodes/v0_0/val_mini.json.gz",
         "habitat.dataset.scenes_dir=data/hssd-hab/",
-        "habitat.simulator.agents.main_agent.articulated_agent_urdf=/home/oakers1/scratchtshu2/oakers1/partnr-planner/data/robots/hab_spot_arm/urdf/hab_spot_arm.urdf",
+        f"habitat.simulator.agents.main_agent.articulated_agent_urdf={robot_urdf_path}",
         "habitat.simulator.agents.main_agent.articulated_agent_type=SpotRobot",
+        f"habitat.simulator.habitat_sim_v0.gpu_device_id={gpu_device_id}",
     ]
     SENSOR_OVERRIDES = [
         "habitat.simulator.agents.main_agent.sim_sensors.jaw_depth_sensor.normalize_depth=False"
@@ -139,6 +157,11 @@ def run_planner():
         rooms = env_interface.world_graph[robot_agent_uid].get_all_nodes_of_type(Room)
 
         print(f"---Total number of rooms in this house: {len(rooms)}---\n\n")
+        
+        # Limit to first 2 rooms for faster testing
+        rooms = rooms[:2]
+        print(f"Limiting to {len(rooms)} rooms for testing\n")
+        
         while rooms:
             print(f"{len(rooms)} more room to go...")
             current_room = rooms.pop()
@@ -146,37 +169,45 @@ def run_planner():
             hl_action_input = current_room.name
             hl_action_done = False
             print(f"Executing high-level action: {hl_action_name} on {hl_action_input}")
-            while not hl_action_done:
-                # Get response and/or low level actions
-                low_level_action, response = eval_runner.planner.agents[
-                    0
-                ].process_high_level_action(
-                    hl_action_name, hl_action_input, observations
-                )
-                low_level_action = {0: low_level_action}
-                obs, reward, done, info = env_interface.step(low_level_action)
-                # Refresh observations
-                observations = env_interface.parse_observations(obs)
-                # Store third person frames for generating video
-                # hl_dict = {0: (hl_action_name, hl_action_input)}
-                # eval_runner._store_for_video(observations, hl_dict)
+            
+            try:
+                while not hl_action_done:
+                    # Get response and/or low level actions
+                    low_level_action, response = eval_runner.planner.agents[
+                        0
+                    ].process_high_level_action(
+                        hl_action_name, hl_action_input, observations
+                    )
+                    low_level_action = {0: low_level_action}
+                    obs, reward, done, info = env_interface.step(low_level_action)
+                    # Refresh observations
+                    observations = env_interface.parse_observations(obs)
+                    # Store third person frames for generating video
+                    # hl_dict = {0: (hl_action_name, hl_action_input)}
+                    # eval_runner._store_for_video(observations, hl_dict)
 
-                # figure out how to get completion signal
-                if response:
-                    print(f"\tResponse: {response}")
-                    hl_action_done = True
-            print(
-                f"\tCompleted high-level action: {hl_action_name} on {hl_action_input}"
-            )
+                    # figure out how to get completion signal
+                    if response:
+                        print(f"\tResponse: {response}")
+                        hl_action_done = True
+                print(
+                    f"\tCompleted high-level action: {hl_action_name} on {hl_action_input}"
+                )
+            except Exception as e:
+                print(f"\tError exploring {hl_action_input}: {e}")
+                print(f"\tSkipping to next room...")
+                continue
 
         # if eval_runner.frames:
         #     eval_runner._make_video(scene_id)
         processed_scenes.add(str(scene_id))
 
-        after_count = len(os.listdir(traj_dir))
-
-        print(f"Trajectory file count after run: {after_count}")
-        print(f"New files added: {after_count - before_count}")
+        if os.path.exists(traj_dir):
+            after_count = len(os.listdir(traj_dir))
+            print(f"Trajectory file count after run: {after_count}")
+            print(f"New files added: {after_count - before_count}")
+        else:
+            print(f"Trajectory directory not found: {traj_dir}")
 
     env_interface.sim.close()
 
