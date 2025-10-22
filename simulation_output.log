@@ -1,0 +1,77 @@
+PluginManager::Manager: duplicate static plugin StbImageImporter, ignoring
+PluginManager::Manager: duplicate static plugin GltfImporter, ignoring
+PluginManager::Manager: duplicate static plugin BasisImporter, ignoring
+PluginManager::Manager: duplicate static plugin AssimpImporter, ignoring
+PluginManager::Manager: duplicate static plugin AnySceneImporter, ignoring
+PluginManager::Manager: duplicate static plugin AnyImageImporter, ignoring
+[34m
+Start of the scene mapping routine[0m
+Trajectory file count before run: 98
+Using GPU device ID: 0
+Finished setting up config
+xytest [2]
+xytest 369
+2025-10-22 00:29:33,622 initializing sim CollaborationSim-v0
+PluginManager::Manager: duplicate static plugin StbImageImporter, ignoring
+PluginManager::Manager: duplicate static plugin GltfImporter, ignoring
+PluginManager::Manager: duplicate static plugin BasisImporter, ignoring
+PluginManager::Manager: duplicate static plugin AssimpImporter, ignoring
+PluginManager::Manager: duplicate static plugin AnySceneImporter, ignoring
+PluginManager::Manager: duplicate static plugin AnyImageImporter, ignoring
+2025-10-22 00:29:38,908 Initializing task RearrangeEmptyTask-v0
+/scratch/tshu2/yyin34/projects/3d_belief/miniconda3/envs/dfm-pixel-habitat/lib/python3.9/site-packages/gym/spaces/box.py:84: UserWarning: [33mWARN: Box bound precision lowered by casting to float32[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+processing tool: "oracle_nav"
+processing tool: "oracle_nav_pose"
+processing tool: "oracle_pick"
+processing tool: "oracle_place"
+processing tool: "oracle_open"
+processing tool: "oracle_close"
+processing tool: "oracle_rearrange"
+processing tool: "oracle_explore"
+processing tool: "wait"
+processing tool: "find_receptacle_tool"
+processing tool: "find_object_tool"
+processing tool: "find_agent_action_tool"
+processing tool: "find_room_tool"
+[32msuccessfully added agent with UID : 0[0m
+finished initializing agents!
+[34m
+---------------------------------------[0m
+[34mPlanner Mode: Centralized[0m
+[34mPartial Observability: False[0m
+[34mAgent List: [0][0m
+[32mSingle agent mode[0m
+[34m---------------------------------------
+[0m
+Processing scene: 102817140, episode: 1/1, processed scenes: 0/10
+---Total number of rooms in this house: 11---
+
+
+Limiting to 2 rooms for testing
+
+[TEST MODE] Limiting to 5 furniture items per room
+
+2 more room to go...
+Executing high-level action: Explore on other_room_1
+[SCENE_MAPPING] Starting room exploration loop for other_room_1
+[SCENE_MAPPING] Step 1: About to call process_high_level_action
+[SCENE_MAPPING] Agent type: Agent
+[SCENE_MAPPING] Agent has process_high_level_action: True
+[SCENE_MAPPING] Step 1: Returned, response='', action is None: False
+[SCENE_MAPPING] Step 2: About to call process_high_level_action
+[SCENE_MAPPING] Step 2: Returned, response='', action is None: False
+[SCENE_MAPPING] Step 3: About to call process_high_level_action
+[SCENE_MAPPING] Step 3: Returned, response='', action is None: False
+[SCENE_MAPPING] Step 4: About to call process_high_level_action
+[SCENE_MAPPING] Step 4: Returned, response='', action is None: False
+[SCENE_MAPPING] Step 5: About to call process_high_level_action
+[SCENE_MAPPING] Step 5: Returned, response='', action is None: False
+[SCENE_MAPPING] Step 6: About to call process_high_level_action
+[SCENE_MAPPING] Step 6: Returned, response='', action is None: False
+[SCENE_MAPPING] Step 7: About to call process_high_level_action
+[SCENE_MAPPING] Step 7: Returned, response='', action is None: False
+[SCENE_MAPPING] Step 8: About to call process_high_level_action
+[SCENE_MAPPING] Step 8: Returned, response='', action is None: False
+[SCENE_MAPPING] Step 9: About to call process_high_level_action
+[SCENE_MAPPING] Step 9: Returned, response='', action is None: False

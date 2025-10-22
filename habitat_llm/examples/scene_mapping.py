@@ -13,10 +13,23 @@ This trajectory is then used to create a map of the scenes through Concept-Graph
 import os
 import sys
 
+# Force unbuffered output for better debugging
+import functools
+print = functools.partial(print, flush=True)
+
 # append the path of the
 # parent directory
 sys.path.append("..")
 
+# Force reload of modules to pick up code changes
+if 'habitat_llm.agent.agent' in sys.modules:
+    print("[DEBUG] Reloading habitat_llm.agent.agent module")
+    import importlib
+    importlib.reload(sys.modules['habitat_llm.agent.agent'])
+if 'habitat_llm.tools.motor_skills.skill' in sys.modules:
+    print("[DEBUG] Reloading habitat_llm.tools.motor_skills.skill module")
+    import importlib
+    importlib.reload(sys.modules['habitat_llm.tools.motor_skills.skill'])
 
 from habitat_llm.utils import cprint, setup_config
 
@@ -162,22 +175,92 @@ def run_planner():
         rooms = rooms[:2]
         print(f"Limiting to {len(rooms)} rooms for testing\n")
         
+        # For even faster testing, you can limit furniture per room
+        MAX_FURNITURE_PER_ROOM = 5  # Set to None to explore all furniture
+        if MAX_FURNITURE_PER_ROOM:
+            print(f"[TEST MODE] Limiting to {MAX_FURNITURE_PER_ROOM} furniture items per room\n")
+        
         while rooms:
             print(f"{len(rooms)} more room to go...")
             current_room = rooms.pop()
+            
+            # Optionally limit furniture for faster testing
+            if MAX_FURNITURE_PER_ROOM:
+                # Temporarily modify the world graph to limit furniture
+                original_get_furniture = env_interface.world_graph[robot_agent_uid].get_furniture_in_room
+                def limited_get_furniture(room_name):
+                    furniture = original_get_furniture(room_name)
+                    if len(furniture) > MAX_FURNITURE_PER_ROOM:
+                        print(f"[TEST MODE] Room {room_name} has {len(furniture)} furniture, limiting to {MAX_FURNITURE_PER_ROOM}")
+                        furniture = furniture[:MAX_FURNITURE_PER_ROOM]
+                    return furniture
+                env_interface.world_graph[robot_agent_uid].get_furniture_in_room = limited_get_furniture
+            
             hl_action_name = "Explore"
             hl_action_input = current_room.name
             hl_action_done = False
             print(f"Executing high-level action: {hl_action_name} on {hl_action_input}")
             
             try:
+                step_count = 0
+                max_steps_per_room = 3000  # Safety timeout
+                print(f"[SCENE_MAPPING] Starting room exploration loop for {hl_action_input}")
                 while not hl_action_done:
+                    step_count += 1
+                    
+                    # Safety timeout check
+                    if step_count >= max_steps_per_room:
+                        print(f"\t[WARNING] Exceeded max steps ({max_steps_per_room}) for room {hl_action_input}")
+                        print(f"\t[WARNING] Forcing completion and moving to next room")
+                        break
+                    
                     # Get response and/or low level actions
-                    low_level_action, response = eval_runner.planner.agents[
-                        0
-                    ].process_high_level_action(
-                        hl_action_name, hl_action_input, observations
-                    )
+                    print(f"[SCENE_MAPPING] Step {step_count}: About to call process_high_level_action", flush=True)
+                    
+                    # Direct check - what is the agent?
+                    agent = eval_runner.planner.agents[0]
+                    if step_count == 1:
+                        print(f"[SCENE_MAPPING] Agent type: {type(agent).__name__}", flush=True)
+                        print(f"[SCENE_MAPPING] Agent has process_high_level_action: {hasattr(agent, 'process_high_level_action')}", flush=True)
+                    
+                    try:
+                        # Introspect the agent's tools
+                        if step_count == 1:
+                            print(f"[SCENE_MAPPING] Agent tools: {list(agent.tools.keys())}")
+                            explore_tool = agent.tools.get('Explore')
+                            if explore_tool:
+                                print(f"[SCENE_MAPPING] Explore tool type: {type(explore_tool).__name__}")
+                                print(f"[SCENE_MAPPING] Explore tool has skill: {hasattr(explore_tool, 'skill')}")
+                                if hasattr(explore_tool, 'skill'):
+                                    skill = explore_tool.skill
+                                    print(f"[SCENE_MAPPING] Skill type: {type(skill).__name__}")
+                                    print(f"[SCENE_MAPPING] Skill _cur_skill_step: {skill._cur_skill_step}")
+                                    print(f"[SCENE_MAPPING] Skill target_is_set: {skill.target_is_set}")
+                        
+                        low_level_action, response = agent.process_high_level_action(
+                            hl_action_name, hl_action_input, observations
+                        )
+                        
+                        # Check skill state after call
+                        if step_count <= 3 or step_count % 50 == 0:
+                            explore_tool = agent.tools.get('Explore')
+                            if explore_tool and hasattr(explore_tool, 'skill'):
+                                skill = explore_tool.skill
+                                print(f"[SCENE_MAPPING] Step {step_count}: Skill step: {skill._cur_skill_step[0].item()}, finished: {skill.finished}, failed: {skill.failed}")
+                                if hasattr(skill, 'target_room_name'):
+                                    print(f"[SCENE_MAPPING] Step {step_count}: Room: {skill.target_room_name}, fur_queue: {len(skill.fur_queue)}, target_fur: {skill.target_fur_name}")
+                        
+                        print(f"[SCENE_MAPPING] Step {step_count}: Returned, response='{response}', action is None: {low_level_action is None}", flush=True)
+                    except Exception as e:
+                        print(f"[SCENE_MAPPING] ERROR in process_high_level_action: {type(e).__name__}: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                        raise
+                    
+                    # Debug output every 100 steps
+                    if step_count % 100 == 0:
+                        print(f"\t[DEBUG] Step {step_count}: Room={hl_action_input}, Response={response}")
+                    
                     low_level_action = {0: low_level_action}
                     obs, reward, done, info = env_interface.step(low_level_action)
                     # Refresh observations

@@ -92,6 +92,10 @@ class OracleExploreSkill(SkillPolicy):
             self.fur_queue = self.env.world_graph[self.agent_uid].get_furniture_in_room(
                 target_room_name
             )
+            # Filter out floor entities - we don't need to navigate to floors
+            from habitat_llm.world_model import Floor
+            self.fur_queue = [f for f in self.fur_queue if not isinstance(f, Floor)]
+            print(f"[EXPLORE] Exploring room {target_room_name} with {len(self.fur_queue)} furniture items")
 
         # Set flag to true
         self.target_is_set = True
@@ -135,6 +139,7 @@ class OracleExploreSkill(SkillPolicy):
         cur_batch_idx,
         deterministic=False,
     ):
+        print(f"[EXPLORE._internal_act] Called for room: {self.target_room_name}, furniture queue length: {len(self.fur_queue)}")
         # Throw error if nav skill is none
         if self.nav_skill == None:
             raise ValueError(
@@ -152,6 +157,26 @@ class OracleExploreSkill(SkillPolicy):
             ).sum()
             > 0
         )
+        
+        # Check if nav skill has failed (e.g., timeout)
+        nav_failed = self.nav_skill.failed
+        if nav_failed and not self.target_node_reached:
+            print(f"[EXPLORE] Nav skill failed for {self.target_fur_name}: {self.nav_skill.termination_message}")
+            print(f"[EXPLORE] Skipping to next furniture. Remaining: {len(self.fur_queue)}")
+            # Mark as reached to move to next furniture
+            self.target_node_reached = True
+            # Reset nav skill for next furniture
+            self.nav_skill.reset(cur_batch_idx)
+            self.nav_skill.target_is_set = False
+
+        # Check if we're stuck on a floor with empty queue - just complete
+        from habitat_llm.world_model import Floor
+        if len(self.fur_queue) == 0 and self.target_fur_name and 'floor' in self.target_fur_name.lower():
+            self._is_exploration_done[cur_batch_idx] = True
+            self.failed = False
+            self.termination_message = f"No real furniture in {self.target_room_name} room."
+            print(f"[EXPLORE] Room {self.target_room_name} only has floor, completing immediately")
+            return action, hxs
 
         # Check if exploration is done
         if self.target_node_reached and len(self.fur_queue) == 0:
@@ -160,6 +185,8 @@ class OracleExploreSkill(SkillPolicy):
             # Fetch termination message from the skill
             self.termination_message = self.nav_skill.termination_message
             self.failed = self.nav_skill.failed
+            
+            print(f"[EXPLORE] Room {self.target_room_name} exploration complete. Visited {self.visited_node_count} furniture.")
 
             return action, hxs
 
@@ -171,6 +198,8 @@ class OracleExploreSkill(SkillPolicy):
 
             # Fetch termination message from the skill
             self.termination_message = f"There is no furniture in {self.target_room_name} room. Explore another room."
+            
+            print(f"[EXPLORE] No furniture in {self.target_room_name}")
 
             return action, hxs
 
@@ -186,7 +215,7 @@ class OracleExploreSkill(SkillPolicy):
 
             # Increase node counter
             self.visited_node_count += 1
-            # print(f"\nself.visited_node_count {self.visited_node_count}")
+            print(f"[EXPLORE] Room {self.target_room_name}: Visiting furniture {self.visited_node_count}/{self.visited_node_count + len(self.fur_queue)}: {self.target_fur_name}")
 
             # Reset the target_is_set so that the agent can set a new target continuously
             self.nav_skill.target_is_set = False

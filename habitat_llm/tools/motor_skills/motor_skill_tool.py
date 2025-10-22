@@ -108,6 +108,7 @@ class MotorSkillTool(Tool):
         return skill
 
     def process_high_level_action(self, target_string, observations):
+        print(f"[MOTOR_SKILL_TOOL] Processing {self.skill_config.name} with target: {target_string}")
         error_messages = [
             "Use the appropriate tool to get a valid name.",
             "This may not be the correct node name, try using appropriate tool to get the exact name. If that doesnt work, this node may just not exist yet, explore the house to discover.",
@@ -118,8 +119,11 @@ class MotorSkillTool(Tool):
 
         # Set the target for this skill
         try:
+            print(f"[MOTOR_SKILL_TOOL] Setting target: {target_string}")
             self.skill.set_target(target_string, self.env)
+            print(f"[MOTOR_SKILL_TOOL] Target set successfully")
         except ValueError as e:
+            print(f"[MOTOR_SKILL_TOOL] ValueError setting target: {e}")
             # Reset the skill if set target fails
             self.skill.reset([0])
 
@@ -141,7 +145,9 @@ class MotorSkillTool(Tool):
                 )
 
         # Get low level action from the skill
+        print(f"[MOTOR_SKILL_TOOL] Getting low level action from skill")
         low_level_action, msg = self.skill.get_low_level_action(observations)
+        print(f"[MOTOR_SKILL_TOOL] Got action, msg: {msg}")
 
         return low_level_action, msg
 

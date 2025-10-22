@@ -636,7 +636,10 @@ class OracleNavSkill(SkillPolicy):
         masks,
         batch_idx,
     ) -> torch.BoolTensor:
-        return (self._has_reached_goal[batch_idx] > 0.0).to(masks.device)
+        is_done = (self._has_reached_goal[batch_idx] > 0.0).to(masks.device)
+        if is_done and hasattr(self, '_target_name'):
+            print(f"[NAV] Reached target: {self._target_name}")
+        return is_done
 
     @property
     def argument_types(self) -> List[str]:

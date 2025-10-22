@@ -190,18 +190,24 @@ class Agent:
         :param action_input: The argument of the action
         :param observations: current agent observations
         """
+        print(f"[AGENT] process_high_level_action called: action={action}, input={action_input}")
         # Fetch tool corresponding to the action
         try:
             tool = self.get_tool_from_name(action)
+            print(f"[AGENT] Tool found: {tool.__class__.__name__}")
         except ValueError:
+            print(f"[AGENT] Tool not found: {action}")
             return None, f'Tool "{action}" not found'
 
         # Process the high level action
         if self._dry_run and not isinstance(tool, PerceptionTool):
+            print(f"[AGENT] Dry run mode, skipping execution")
             return None, f"{action} was a success"
+        print(f"[AGENT] Calling tool.process_high_level_action")
         low_level_action, response = tool.process_high_level_action(
             action_input, observations
         )
+        print(f"[AGENT] Tool returned response: {response}")
 
         # Set last used tool
         self.last_used_tool = tool
