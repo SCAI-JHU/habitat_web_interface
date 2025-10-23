@@ -13,6 +13,13 @@ This trajectory is then used to create a map of the scenes through Concept-Graph
 import os
 import sys
 
+# for photo transmission
+import base64
+import io
+
+# Create a unique episode name
+import datetime
+
 # Force unbuffered output for better debugging
 import functools
 print = functools.partial(print, flush=True)
@@ -21,30 +28,102 @@ print = functools.partial(print, flush=True)
 # parent directory
 sys.path.append("..")
 
-# Force reload of modules to pick up code changes
-if 'habitat_llm.agent.agent' in sys.modules:
-    print("[DEBUG] Reloading habitat_llm.agent.agent module")
-    import importlib
-    importlib.reload(sys.modules['habitat_llm.agent.agent'])
-if 'habitat_llm.tools.motor_skills.skill' in sys.modules:
-    print("[DEBUG] Reloading habitat_llm.tools.motor_skills.skill module")
-    import importlib
-    importlib.reload(sys.modules['habitat_llm.tools.motor_skills.skill'])
+# --- NEW IMPORTS FOR SAVING IMAGES ---
+from PIL import Image
+import numpy as np
+# --- END NEW IMPORTS ---
+
+
+# Force reload of modules to pick up code changes - DISABLED for now
+# Reloading doesn't work well with Hydra configs
+# if 'habitat_llm.agent.agent' in sys.modules:
+#     import importlib
+#     importlib.reload(sys.modules['habitat_llm.agent.agent'])
 
 from habitat_llm.utils import cprint, setup_config
-
-from habitat_llm.agent.env import (
-    EnvironmentInterface,
-    register_actions,
-    register_sensors,
-)
-
-from habitat_llm.evaluation import (
-    CentralizedEvaluationRunner,
-)
+from habitat_llm.agent.env import EnvironmentInterface, register_actions, register_sensors
+from habitat_llm.evaluation import CentralizedEvaluationRunner
 from habitat_llm.world_model import Room
 from habitat_llm.utils.core import get_config
 from habitat_llm.agent.env.dataset import CollaborationDatasetV0
+
+def send_frame_to_stdout(frame_array):
+    """
+    Encodes a frame array (NumPy) into a Base64 string and prints it.
+    """
+    try:
+        # Ensure array is uint8
+        if frame_array.dtype != np.uint8:
+            if frame_array.max() <= 1.0:
+                frame_array = (frame_array * 255).astype(np.uint8)
+            else:
+                frame_array = frame_array.astype(np.uint8)
+        
+        # Handle RGBA if necessary
+        if frame_array.shape[2] == 4:
+            frame_array = frame_array[:, :, :3]
+
+        img = Image.fromarray(frame_array)
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG") # Save image to a memory buffer
+        b64_string = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        
+        # Print the data URI format, which the browser can display directly
+        # The 'flush=True' is crucial for the server to read it immediately
+        print(f"data:image/png;base64,{b64_string}", flush=True) 
+        
+    except Exception as e:
+        print(f"[ERROR_STREAM] Failed to encode/send frame: {e}", flush=True)
+
+
+# --- REVISED HELPER FUNCTION TO SAVE FRAMES (Now calls send_frame_to_stdout) ---
+def save_rgb_frame(frame_array, episode_dir, step_idx):
+    """
+    Save a single RGB frame to disk AND send it to stdout for streaming.
+    
+    frame_array: torch.Tensor or np.ndarray HxWx3
+    episode_dir: str, folder path for this episode
+    step_idx: int, current frame number
+    """
+    try:
+        # Convert from PyTorch Tensor (on GPU) to NumPy array (on CPU)
+        numpy_frame = frame_array # Default if already numpy
+        if not isinstance(frame_array, np.ndarray):
+            numpy_frame = frame_array.cpu().numpy()
+            
+        # --- Send frame for live streaming ---
+        send_frame_to_stdout(numpy_frame) 
+        # ---
+            
+        # --- Continue saving frame to disk (optional, keep for recording) ---
+        rgb_dir = os.path.join(episode_dir, "rgb")
+        os.makedirs(rgb_dir, exist_ok=True)
+        filename = os.path.join(rgb_dir, f"{step_idx:05d}.png")
+        
+        # Ensure array is in the correct format (uint8)
+        save_frame = numpy_frame # Use the converted numpy frame
+        if save_frame.dtype != np.uint8:
+            if save_frame.max() <= 1.0:
+                save_frame = (save_frame * 255).astype(np.uint8)
+            else:
+                save_frame = save_frame.astype(np.uint8)
+                
+        # Handle 4-channel RGBA images if they appear
+        if save_frame.shape[2] == 4:
+            save_frame = save_frame[:, :, :3] # Drop the alpha channel
+            
+        img = Image.fromarray(save_frame)
+        img.save(filename)
+        
+        # Optional: Log a success message for the first few frames
+        if step_idx < 5:
+            # We print to stderr now to avoid interfering with stdout stream
+            print(f"[DEBUG_SAVE] Successfully saved frame {step_idx} to {filename}", file=sys.stderr, flush=True) 
+            
+    except Exception as e:
+        # Print errors to stderr
+        print(f"[ERROR_SAVE] Failed to save/send frame {step_idx} to {episode_dir}: {e}", file=sys.stderr, flush=True)
+# --- END HELPER FUNCTION ---
 
 
 # Method to load agent planner from the config
@@ -53,14 +132,8 @@ def run_planner():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, "../.."))
     
-    # Use dynamic path for trajectory directory
-    traj_dir = os.path.join(project_root, "data/trajectories/epidx_0_scene_106366386_174226770/main_agent/rgb")
-    if os.path.exists(traj_dir):
-        before_count = len(os.listdir(traj_dir))
-        print(f"Trajectory file count before run: {before_count}")
-    else:
-        before_count = 0
-        print(f"Trajectory directory does not exist yet: {traj_dir}")
+    # NOTE: The old 'traj_dir' logic was removed.
+    # A new 'traj_dir' will be created dynamically for EACH episode inside the loop.
 
     # Setup a seed
     seed = 47668090
@@ -91,7 +164,7 @@ def run_planner():
     TRAJECTORY_OVERRIDES = [
         "evaluation.save_video=True",
         "evaluation.output_dir=./outputs",
-        "trajectory.save=True",
+        # "trajectory.save=True", # <-- We are now saving manually, so this can be disabled if it causes conflicts
         "trajectory.agent_names=[main_agent]",
     ]
 
@@ -156,6 +229,16 @@ def run_planner():
         cur_episode = env_interface.env.env.env._env.current_episode
         cur_episode.episode_id = idx
         scene_id = cur_episode.scene_id
+        
+        # --- NEW: Create dynamic directory for this episode ---
+        episode_step_count = 0
+        # Create a unique timestamp for this run
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        traj_dir = os.path.join(project_root, f"data/trajectories/ep_{cur_episode.episode_id}_{timestamp}")
+        os.makedirs(traj_dir, exist_ok=True)
+        print(f"Saving new trajectory live to: {traj_dir}")
+        # --- END NEW ---
+
         if str(scene_id) in processed_scenes:
             print(f"Skipping scene {scene_id}. Already mapped.")
             continue
@@ -164,7 +247,25 @@ def run_planner():
         )
         if len(processed_scenes) == 10:
             break
-        observations = env_interface.get_observations()
+        
+        # --- START OF FIX ---
+        # Get the RAW observation first
+        raw_obs = env_interface.get_observations()
+
+        # --- NEW: Save the very first frame ---
+        try:
+            # The raw observation IS nested by agent ID [0]
+            if 'head_rgb' in raw_obs[0]: 
+                save_rgb_frame(raw_obs[0]['head_rgb'], traj_dir, episode_step_count)            
+            else:
+                print(f"[DEBUG] 'head_rgb' key not in initial observations.")
+        except Exception as e:
+            print(f"[ERROR] Failed to save initial frame: {e}")
+        # --- END NEW ---
+        
+        # NOW, parse the observation to feed to the agent
+        observations = env_interface.parse_observations(raw_obs)
+        # --- END OF FIX ---
 
         # get the list of all rooms in this house
         rooms = env_interface.world_graph[robot_agent_uid].get_all_nodes_of_type(Room)
@@ -237,6 +338,7 @@ def run_planner():
                                     print(f"[SCENE_MAPPING] Skill _cur_skill_step: {skill._cur_skill_step}")
                                     print(f"[SCENE_MAPPING] Skill target_is_set: {skill.target_is_set}")
                         
+                        # Agent is fed the PARSED observations
                         low_level_action, response = agent.process_high_level_action(
                             hl_action_name, hl_action_input, observations
                         )
@@ -262,12 +364,22 @@ def run_planner():
                         print(f"\t[DEBUG] Step {step_count}: Room={hl_action_input}, Response={response}")
                     
                     low_level_action = {0: low_level_action}
+                    # 'obs' is the NEW RAW observation from the simulator
                     obs, reward, done, info = env_interface.step(low_level_action)
-                    # Refresh observations
+                    # 'observations' is the NEW PARSED observation for the *next* loop
                     observations = env_interface.parse_observations(obs)
-                    # Store third person frames for generating video
-                    # hl_dict = {0: (hl_action_name, hl_action_input)}
-                    # eval_runner._store_for_video(observations, hl_dict)
+                    
+                    # --- NEW: Save the new frame ---
+                    episode_step_count += 1
+                    try:
+                        # Save the RAW frame from 'obs' (which is NOT nested)
+                        if 'head_rgb' in obs: 
+                            save_rgb_frame(obs['head_rgb'], traj_dir, episode_step_count)                        
+                        else:
+                            print(f"[DEBUG] 'head_rgb' key not in observations on step {episode_step_count}.")
+                    except Exception as e:
+                        print(f"[ERROR] Failed to save frame {episode_step_count}: {e}")
+                    # --- END NEW ---
 
                     # figure out how to get completion signal
                     if response:
@@ -285,12 +397,8 @@ def run_planner():
         #     eval_runner._make_video(scene_id)
         processed_scenes.add(str(scene_id))
 
-        if os.path.exists(traj_dir):
-            after_count = len(os.listdir(traj_dir))
-            print(f"Trajectory file count after run: {after_count}")
-            print(f"New files added: {after_count - before_count}")
-        else:
-            print(f"Trajectory directory not found: {traj_dir}")
+        # NOTE: Removed the old file counting logic as it's no longer relevant.
+        print(f"Finished processing episode for scene {scene_id}.")
 
     env_interface.sim.close()
 
