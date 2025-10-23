@@ -2,72 +2,117 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>SCAI Lab Simulation Runner</title>
+    <title>SCAI Lab Simulation Runner - Live Feed</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding-top: 50px; }
         #status { margin: 20px; font-style: italic; color: #555; }
-        #video-container { margin-top: 30px; }
-        video { border: 1px solid #ccc; }
+        #live-feed-container { margin-top: 30px; min-height: 480px; /* Prevent layout jump */ }
+        #liveFeedImage { border: 1px solid #ccc; max-width: 80%; height: auto; }
+        .error { color: red; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>Simulation Control Panel</h1>
+    <h1>Simulation Control Panel - Live Feed</h1>
     <button id="runButton">Run Simulation</button>
     <div id="status">Status: Idle</div>
-    <div id="video-container" style="display: none;">
-        <video id="resultVideo" width="800" controls></video>
+    <div id="live-feed-container">
+        <img id="liveFeedImage" alt="Live simulation feed will appear here..." src="" />
     </div>
 
     <script>
         const runButton = document.getElementById('runButton');
         const statusDiv = document.getElementById('status');
-        const videoContainer = document.getElementById('video-container');
-        const resultVideo = document.getElementById('resultVideo');
-        let pollingInterval;
+        const liveFeedImage = document.getElementById('liveFeedImage');
+        let socket;
 
-        // Function to check the simulation status from the backend
-        async function checkStatus() {
-            try {
-                const response = await fetch('/status');
-                const data = await response.json();
+        function connectWebSocket() {
+            // Determine WebSocket protocol (ws or wss)
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/live_feed`;
+            
+            console.log(`Connecting to WebSocket: ${wsUrl}`);
+            socket = new WebSocket(wsUrl);
 
-                statusDiv.textContent = `Status: ${data.status}`;
+            socket.onopen = function(event) {
+                console.log("WebSocket connection established.");
+                // You could optionally send a start message here if needed
+                // socket.send("start"); 
+                statusDiv.textContent = 'Status: WebSocket Connected. Ready to run.';
+                statusDiv.className = ''; 
+            };
 
-                if (data.status === 'complete') {
-                    console.log("Simulation complete! Video URL:", data.video_url);
-                    resultVideo.src = data.video_url;
-                    videoContainer.style.display = 'block';
-                    runButton.disabled = false;
-                    clearInterval(pollingInterval); // Stop polling
-                } else if (data.status === 'error') {
-                    console.error("Simulation failed.");
-                    runButton.disabled = false;
-                    clearInterval(pollingInterval); // Stop polling
+            socket.onmessage = function(event) {
+                const message = event.data;
+
+                if (message.startsWith("data:image/png;base64,")) {
+                    // It's an image frame
+                    liveFeedImage.src = message;
+                } else if (message.startsWith("status:")) {
+                    // It's a status update from the server
+                    const parts = message.split(':', 3); // "status:type:message"
+                    const statusType = parts[1];
+                    const statusMessage = parts[2] || '';
+                    
+                    console.log(`Status Update: ${statusType} - ${statusMessage}`);
+                    statusDiv.textContent = `Status: ${statusType} - ${statusMessage}`;
+                    statusDiv.className = statusType === 'error' ? 'error' : ''; // Style errors
+
+                    if (statusType === 'complete' || statusType === 'error') {
+                        runButton.disabled = false; // Re-enable button on completion/error
+                    }
+                } else {
+                    // Log unexpected messages
+                    console.log("Received unexpected message:", message);
                 }
-            } catch (error) {
-                console.error("Failed to fetch status:", error);
-                statusDiv.textContent = 'Status: Error connecting to server.';
-            }
+            };
+
+            socket.onclose = function(event) {
+                console.log("WebSocket connection closed.", event);
+                statusDiv.textContent = 'Status: Disconnected. Please refresh.';
+                statusDiv.className = 'error';
+                runButton.disabled = true; // Disable button on disconnect
+            };
+
+            socket.onerror = function(error) {
+                console.error("WebSocket error:", error);
+                statusDiv.textContent = 'Status: Connection Error.';
+                statusDiv.className = 'error';
+                runButton.disabled = true;
+            };
         }
 
         // Event listener for the run button
         runButton.addEventListener('click', async () => {
-            console.log("Starting simulation...");
+            console.log("Requesting simulation start...");
             runButton.disabled = true;
-            statusDiv.textContent = 'Status: Starting...';
-            videoContainer.style.display = 'none';
+            statusDiv.textContent = 'Status: Requesting simulation start...';
+            statusDiv.className = '';
+            liveFeedImage.src = ""; // Clear previous image
 
             try {
                 // Tell the server to start the simulation
-                await fetch('/run-simulation', { method: 'POST' });
-                // Start polling every 3 seconds to check for completion
-                pollingInterval = setInterval(checkStatus, 3000);
+                const response = await fetch('/run-simulation', { method: 'POST' });
+                const data = await response.json();
+                console.log("Simulation start request sent:", data.message);
+                // Status updates will now come via WebSocket
+                
+                // Ensure WebSocket is connected (or try connecting if not)
+                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                    console.log("WebSocket not open, attempting connection...");
+                    connectWebSocket(); 
+                }
+
             } catch (error) {
-                console.error("Failed to start simulation:", error);
+                console.error("Failed to send start simulation request:", error);
                 statusDiv.textContent = 'Status: Error starting simulation.';
+                statusDiv.className = 'error';
                 runButton.disabled = false;
             }
         });
+
+        // Initial WebSocket connection when the page loads
+        connectWebSocket();
+
     </script>
 </body>
 </html>
