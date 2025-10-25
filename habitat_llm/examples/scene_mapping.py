@@ -24,15 +24,13 @@ import datetime
 import functools
 print = functools.partial(print, flush=True)
 
+# For image saving
+import numpy as np
+import imageio
+
 # append the path of the
 # parent directory
 sys.path.append("..")
-
-# --- NEW IMPORTS FOR SAVING IMAGES ---
-from PIL import Image
-import numpy as np
-# --- END NEW IMPORTS ---
-
 
 # Force reload of modules to pick up code changes - DISABLED for now
 # Reloading doesn't work well with Hydra configs
@@ -63,9 +61,8 @@ def send_frame_to_stdout(frame_array):
         if frame_array.shape[2] == 4:
             frame_array = frame_array[:, :, :3]
 
-        img = Image.fromarray(frame_array)
         buffer = io.BytesIO()
-        img.save(buffer, format="PNG") # Save image to a memory buffer
+        imageio.imwrite(buffer, frame_array, format='PNG') # Save image to a memory buffer
         b64_string = base64.b64encode(buffer.getvalue()).decode("utf-8")
         
         # Print the data URI format, which the browser can display directly
@@ -100,6 +97,9 @@ def save_rgb_frame(frame_array, episode_dir, step_idx):
         os.makedirs(rgb_dir, exist_ok=True)
         filename = os.path.join(rgb_dir, f"{step_idx:05d}.png")
         
+        if step_idx < 3:
+            print(f"[TRAJ] Saving frame {step_idx} to: {filename}")
+        
         # Ensure array is in the correct format (uint8)
         save_frame = numpy_frame # Use the converted numpy frame
         if save_frame.dtype != np.uint8:
@@ -112,8 +112,7 @@ def save_rgb_frame(frame_array, episode_dir, step_idx):
         if save_frame.shape[2] == 4:
             save_frame = save_frame[:, :, :3] # Drop the alpha channel
             
-        img = Image.fromarray(save_frame)
-        img.save(filename)
+        imageio.imwrite(filename, save_frame)
         
         # Optional: Log a success message for the first few frames
         if step_idx < 5:
@@ -164,7 +163,7 @@ def run_planner():
     TRAJECTORY_OVERRIDES = [
         "evaluation.save_video=True",
         "evaluation.output_dir=./outputs",
-        # "trajectory.save=True", # <-- We are now saving manually, so this can be disabled if it causes conflicts
+        "trajectory.save=True",  # Enable trajectory image saving
         "trajectory.agent_names=[main_agent]",
     ]
 
@@ -235,8 +234,12 @@ def run_planner():
         # Create a unique timestamp for this run
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         traj_dir = os.path.join(project_root, f"data/trajectories/ep_{cur_episode.episode_id}_{timestamp}")
-        os.makedirs(traj_dir, exist_ok=True)
-        print(f"Saving new trajectory live to: {traj_dir}")
+        print(f"[TRAJ] Creating trajectory directory: {traj_dir}")
+        try:
+            os.makedirs(traj_dir, exist_ok=True)
+            print(f"[TRAJ] ✓ Directory created successfully: {traj_dir}")
+        except Exception as e:
+            print(f"[TRAJ] ✗ Failed to create directory: {e}")
         # --- END NEW ---
 
         if str(scene_id) in processed_scenes:
