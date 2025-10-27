@@ -47,6 +47,7 @@ from habitat_llm.agent.env.dataset import CollaborationDatasetV0
 
 def send_frame_to_stdout(frame_array):
     """
+    Hello
     Encodes a frame array (NumPy) into a Base64 string and prints it.
     """
     try:
