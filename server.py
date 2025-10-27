@@ -3,6 +3,8 @@ import subprocess
 import uuid
 import asyncio # For handling subprocess streams
 import sys # To find the python executable
+import glob
+import base64
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect # Import WebSocket components
 from fastapi.responses import JSONResponse
@@ -75,6 +77,49 @@ async def broadcast_message(message: str):
             print(f"Removed disconnected client: {client.client}")
 
 
+# --- Image Streaming from Trajectory Directory ---
+async def stream_trajectory_images(trajectory_base_dir):
+    """Watch the trajectory directory and stream new images as they appear."""
+    last_image_index = -1
+    
+    while simulation_status["status"] == "running":
+        try:
+            # Find the most recent epidx directory
+            epidx_dirs = glob.glob(os.path.join(trajectory_base_dir, "epidx_*/main_agent/rgb"))
+            if not epidx_dirs:
+                await asyncio.sleep(1)
+                continue
+            
+            # Get the most recent one
+            rgb_dir = max(epidx_dirs, key=os.path.getmtime)
+            
+            # Find all jpg files
+            jpg_files = sorted(glob.glob(os.path.join(rgb_dir, "*.jpg")))
+            
+            # Stream any new images
+            for jpg_file in jpg_files:
+                # Extract index from filename (e.g., "123.jpg" -> 123)
+                idx = int(os.path.splitext(os.path.basename(jpg_file))[0])
+                
+                if idx > last_image_index:
+                    # Read and encode the image
+                    with open(jpg_file, 'rb') as f:
+                        img_data = f.read()
+                    b64_string = base64.b64encode(img_data).decode('utf-8')
+                    
+                    # Send via WebSocket
+                    await broadcast_message(f"data:image/jpeg;base64,{b64_string}")
+                    last_image_index = idx
+                    
+                    if idx % 10 == 0:  # Log every 10th image
+                        print(f"[IMAGE_STREAM] Sent image {idx}")
+            
+            await asyncio.sleep(0.5)  # Check for new images twice per second
+            
+        except Exception as e:
+            print(f"[IMAGE_STREAM] Error: {e}")
+            await asyncio.sleep(1)
+
 # --- Modified Simulation Runner (Runs as an async task) ---
 async def run_simulation_process():
     """Runs the simulation script as a subprocess and streams its output via WebSocket."""
@@ -136,7 +181,11 @@ async def run_simulation_process():
                     # Send status/error updates over WebSocket
                     await broadcast_message(f"{status_prefix}{line[:200]}") # Send truncated status
 
-        # Run stream readers concurrently
+        # Start image streaming task
+        trajectory_dir = os.path.join(PROJECT_ROOT_DIR, "data/trajectories")
+        image_stream_task = asyncio.create_task(stream_trajectory_images(trajectory_dir))
+        
+        # Run stream readers concurrently (but not image streaming yet)
         await asyncio.gather(
             stream_output(process.stdout, "STDOUT"),
             stream_output(process.stderr, "STDERR")
@@ -144,6 +193,13 @@ async def run_simulation_process():
 
         # Wait for the process to fully exit and get the return code
         await process.wait()
+        
+        # Cancel image streaming task
+        image_stream_task.cancel()
+        try:
+            await image_stream_task
+        except asyncio.CancelledError:
+            pass
 
         # Final status update based on return code
         if process.returncode == 0:
@@ -198,6 +254,38 @@ async def start_simulation_endpoint(): # <-- Needs to be async
 async def get_status():
     """Returns the current status (less critical now with WebSockets)."""
     return JSONResponse(simulation_status)
+
+@app.get("/latest-image")
+async def get_latest_image():
+    """Returns the latest image from the trajectory directory as base64."""
+    try:
+        trajectory_base_dir = os.path.join(PROJECT_ROOT_DIR, "data/trajectories")
+        epidx_dirs = glob.glob(os.path.join(trajectory_base_dir, "epidx_*/main_agent/rgb"))
+        
+        if not epidx_dirs:
+            return JSONResponse({"error": "No trajectory directory found"}, status_code=404)
+        
+        rgb_dir = max(epidx_dirs, key=os.path.getmtime)
+        jpg_files = sorted(glob.glob(os.path.join(rgb_dir, "*.jpg")))
+        
+        if not jpg_files:
+            return JSONResponse({"error": "No images found"}, status_code=404)
+        
+        # Get the latest image
+        latest_image = jpg_files[-1]
+        
+        with open(latest_image, 'rb') as f:
+            img_data = f.read()
+        
+        b64_string = base64.b64encode(img_data).decode('utf-8')
+        
+        return JSONResponse({
+            "image": f"data:image/jpeg;base64,{b64_string}",
+            "filename": os.path.basename(latest_image),
+            "total_images": len(jpg_files)
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # --- Static File Serving ---

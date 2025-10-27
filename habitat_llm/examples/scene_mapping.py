@@ -229,18 +229,8 @@ def run_planner():
         cur_episode.episode_id = idx
         scene_id = cur_episode.scene_id
         
-        # --- NEW: Create dynamic directory for this episode ---
+        # Manual trajectory saving disabled - using Habitat's built-in system only
         episode_step_count = 0
-        # Create a unique timestamp for this run
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        traj_dir = os.path.join(project_root, f"data/trajectories/ep_{cur_episode.episode_id}_{timestamp}")
-        print(f"[TRAJ] Creating trajectory directory: {traj_dir}")
-        try:
-            os.makedirs(traj_dir, exist_ok=True)
-            print(f"[TRAJ] ✓ Directory created successfully: {traj_dir}")
-        except Exception as e:
-            print(f"[TRAJ] ✗ Failed to create directory: {e}")
-        # --- END NEW ---
 
         if str(scene_id) in processed_scenes:
             print(f"Skipping scene {scene_id}. Already mapped.")
@@ -255,16 +245,7 @@ def run_planner():
         # Get the RAW observation first
         raw_obs = env_interface.get_observations()
 
-        # --- NEW: Save the very first frame ---
-        try:
-            # The raw observation IS nested by agent ID [0]
-            if 'head_rgb' in raw_obs[0]: 
-                save_rgb_frame(raw_obs[0]['head_rgb'], traj_dir, episode_step_count)            
-            else:
-                print(f"[DEBUG] 'head_rgb' key not in initial observations.")
-        except Exception as e:
-            print(f"[ERROR] Failed to save initial frame: {e}")
-        # --- END NEW ---
+        # Manual frame saving disabled - Habitat handles this
         
         # NOW, parse the observation to feed to the agent
         observations = env_interface.parse_observations(raw_obs)
@@ -372,17 +353,8 @@ def run_planner():
                     # 'observations' is the NEW PARSED observation for the *next* loop
                     observations = env_interface.parse_observations(obs)
                     
-                    # --- NEW: Save the new frame ---
+                    # Manual frame saving disabled - Habitat handles this
                     episode_step_count += 1
-                    try:
-                        # Save the RAW frame from 'obs' (which is NOT nested)
-                        if 'head_rgb' in obs: 
-                            save_rgb_frame(obs['head_rgb'], traj_dir, episode_step_count)                        
-                        else:
-                            print(f"[DEBUG] 'head_rgb' key not in observations on step {episode_step_count}.")
-                    except Exception as e:
-                        print(f"[ERROR] Failed to save frame {episode_step_count}: {e}")
-                    # --- END NEW ---
 
                     # figure out how to get completion signal
                     if response:

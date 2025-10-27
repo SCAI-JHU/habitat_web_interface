@@ -582,6 +582,8 @@ class EnvironmentInterface:
         # save data from this time-step; for current episode_id and scene
         # also save the episode description in folder
         if self.save_trajectory and self.trajectory_agent_names is not None:
+            if self._trajectory_idx % 50 == 0:
+                print(f"[ENV_INTERFACE] Saving trajectory frame {self._trajectory_idx}")
             for curr_agent, camera_source in zip(
                 self.trajectory_agent_names, self.conf.trajectory.camera_prefixes
             ):
@@ -669,8 +671,10 @@ class EnvironmentInterface:
 
         # Setup trajectory logging mechanism if not already done
         if self.save_trajectory and not self._setup_current_episode_logging:
+            print(f"[ENV_INTERFACE] Setting up trajectory logging...")
             self.setup_logging_for_current_episode()
             self._setup_current_episode_logging = True
+            print(f"[ENV_INTERFACE] Trajectory logging setup complete. Save prefix: {self.trajectory_save_prefix}")
 
         # get the joint final_action_vector
         final_action_vector = self.get_final_action_vector(low_level_actions)
