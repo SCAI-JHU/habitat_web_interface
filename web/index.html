@@ -4,28 +4,258 @@
     <meta charset="UTF-8">
     <title>SCAI Lab Simulation Runner - Live Feed</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding-top: 50px; }
-        #status { margin: 20px; font-style: italic; color: #555; }
-        #live-feed-container { margin-top: 30px; min-height: 480px; /* Prevent layout jump */ }
-        #liveFeedImage { border: 1px solid #ccc; max-width: 80%; height: auto; }
-        .error { color: red; font-weight: bold; }
+        body { 
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background-color: #1a1a1a; 
+            color: #ffffff; 
+        }
+        .page {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 16px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            align-items: start;
+            padding-bottom: 24px;
+        }
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            text-align: center;
+            margin: 12px 0 24px;
+        }
+        .header h1 {
+            color: #e6e6e6;
+            margin: 0;
+            font-weight: 600;
+        }
+        .controls {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            margin: 12px 0 12px;
+        }
+        button {
+            background-color: #2a2a2a;
+            color: #e6e6e6;
+            border: 1px solid #3a3a3a;
+            padding: 10px 18px;
+            cursor: pointer;
+            font-family: inherit;
+            border-radius: 6px;
+            line-height: 1.2;
+            min-height: 36px;
+        }
+        button:hover {
+            background-color: #333333;
+        }
+        button:disabled {
+            background-color: #202020;
+            color: #7a7a7a;
+            cursor: not-allowed;
+        }
+        #status { 
+            margin: 10px 0; 
+            font-style: italic; 
+            color: #bfbfbf; 
+            text-align: center;
+            min-height: 22px;
+        }
+        .error { color: #ff6b6b; font-weight: 600; }
+        .warning { color: #ffc069; }
+        .info { color: #a6a6a6; }
+        .success { color: #c3e88d; }
+        
+        /* Terminal Styles */
+        .terminal {
+            background-color: #111111;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            padding: 14px 16px;
+            height: calc(100vh - 300px);
+            min-height: 280px;
+            overflow-y: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .terminal::-webkit-scrollbar {
+            width: 8px;
+        }
+        .terminal::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        .terminal::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 4px;
+        }
+        .terminal::-webkit-scrollbar-thumb:hover {
+            background: #777;
+        }
+        .terminal-line {
+            margin: 2px 0;
+            word-wrap: break-word;
+        }
+        .terminal-timestamp {
+            color: #8c8c8c;
+            margin-right: 10px;
+        }
+        .terminal-prompt {
+            color: #a6a6a6;
+            margin-right: 6px;
+        }
+        
+        /* Live Feed Styles */
+        #live-feed-container { 
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #141414;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            padding: 16px;
+            height: calc(100vh - 300px);
+            min-height: 280px;
+        }
+        #liveFeedImage { 
+            border: 1px solid #555; 
+            max-width: 100%; 
+            max-height: 100%;
+            height: auto; 
+        }
+        .no-image {
+            color: #666;
+            font-style: italic;
+        }
+        
+        .panel-title {
+            color: #d9d9d9;
+            font-size: 16px;
+            margin: 0 0 12px;
+            text-align: center;
+            border-bottom: 1px solid #2a2a2a;
+            padding-bottom: 8px;
+            letter-spacing: 0.2px;
+        }
+
+        @media (max-width: 1100px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+            .terminal, #live-feed-container {
+                height: 360px;
+            }
+        }
     </style>
 </head>
 <body>
-    <h1>Simulation Control Panel - Live Feed</h1>
-    <button id="runButton">Run Simulation</button>
-    <button id="refreshButton">Refresh Image</button>
-    <div id="status">Status: Idle</div>
-    <div id="live-feed-container">
-        <img id="liveFeedImage" alt="Live simulation feed will appear here..." src="" />
+    <div class="page">
+    <div class="header">
+        <h1>SCAI Lab Simulation Control Panel</h1>
+        <div class="controls">
+            <button id="runButton">Run Simulation</button>
+            <button id="refreshButton">Refresh Image</button>
+            <button id="clearTerminalButton">Clear Terminal</button>
+        </div>
+        <div id="status">Status: Idle</div>
+    </div>
+    
+    <div class="container">
+        <div class="left-panel">
+            <div class="panel-title">Terminal Console</div>
+            <div id="terminal" class="terminal">
+                <div class="terminal-line">
+                    <span class="terminal-timestamp">[00:00:00]</span>
+                    <span class="terminal-prompt">$</span>
+                    <span>System initialized. Ready to run simulation.</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="right-panel">
+            <div class="panel-title">Live Simulation Feed</div>
+            <div id="live-feed-container">
+                <img id="liveFeedImage" alt="Live simulation feed will appear here..." src="" class="no-image" />
+                <div class="no-image" id="noImageMessage">No simulation feed available</div>
+            </div>
+        </div>
+    </div>
     </div>
 
     <script>
         const runButton = document.getElementById('runButton');
         const refreshButton = document.getElementById('refreshButton');
+        const clearTerminalButton = document.getElementById('clearTerminalButton');
         const statusDiv = document.getElementById('status');
         const liveFeedImage = document.getElementById('liveFeedImage');
+        const noImageMessage = document.getElementById('noImageMessage');
+        const terminal = document.getElementById('terminal');
         let socket;
+
+        // Terminal utility functions
+        function getCurrentTime() {
+            const now = new Date();
+            return now.toTimeString().split(' ')[0];
+        }
+
+        function addTerminalLine(message, type = 'info') {
+            const line = document.createElement('div');
+            line.className = 'terminal-line';
+            
+            const timestamp = document.createElement('span');
+            timestamp.className = 'terminal-timestamp';
+            timestamp.textContent = `[${getCurrentTime()}]`;
+            
+            const prompt = document.createElement('span');
+            prompt.className = 'terminal-prompt';
+            prompt.textContent = '$';
+            
+            const content = document.createElement('span');
+            content.textContent = message;
+            content.className = type;
+            
+            line.appendChild(timestamp);
+            line.appendChild(prompt);
+            line.appendChild(content);
+            
+            terminal.appendChild(line);
+            
+            // Auto-scroll to bottom
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function clearTerminal() {
+            terminal.innerHTML = '';
+            addTerminalLine('Terminal cleared.', 'info');
+        }
+
+        function updateImageDisplay(imageSrc) {
+            if (imageSrc) {
+                liveFeedImage.src = imageSrc;
+                liveFeedImage.style.display = 'block';
+                noImageMessage.style.display = 'none';
+            } else {
+                liveFeedImage.style.display = 'none';
+                noImageMessage.style.display = 'block';
+            }
+        }
 
         function connectWebSocket() {
             // Determine WebSocket protocol (ws or wss)
@@ -37,8 +267,7 @@
 
             socket.onopen = function(event) {
                 console.log("WebSocket connection established.");
-                // You could optionally send a start message here if needed
-                // socket.send("start"); 
+                addTerminalLine("WebSocket connection established.", 'success');
                 statusDiv.textContent = 'Status: WebSocket Connected. Ready to run.';
                 statusDiv.className = ''; 
             };
@@ -48,7 +277,8 @@
 
                 if (message.startsWith("data:image/png;base64,") || message.startsWith("data:image/jpeg;base64,")) {
                     // It's an image frame (PNG or JPEG)
-                    liveFeedImage.src = message;
+                    updateImageDisplay(message);
+                    addTerminalLine("Received new image frame", 'info');
                 } else if (message.startsWith("status:")) {
                     // It's a status update from the server
                     const parts = message.split(':', 3); // "status:type:message"
@@ -58,6 +288,15 @@
                     console.log(`Status Update: ${statusType} - ${statusMessage}`);
                     statusDiv.textContent = `Status: ${statusType} - ${statusMessage}`;
                     statusDiv.className = statusType === 'error' ? 'error' : ''; // Style errors
+
+                    // Display in terminal with appropriate styling
+                    let terminalType = 'info';
+                    if (statusType === 'error') terminalType = 'error';
+                    else if (statusType === 'running') terminalType = 'info';
+                    else if (statusType === 'complete') terminalType = 'success';
+                    else if (statusType === 'warning') terminalType = 'warning';
+                    
+                    addTerminalLine(`[${statusType.toUpperCase()}] ${statusMessage}`, terminalType);
 
                     if (statusType === 'complete' || statusType === 'error') {
                         runButton.disabled = false; // Re-enable button on completion/error
@@ -70,11 +309,13 @@
                 } else {
                     // Log unexpected messages
                     console.log("Received unexpected message:", message);
+                    addTerminalLine(`Unexpected message: ${message}`, 'warning');
                 }
             };
 
             socket.onclose = function(event) {
                 console.log("WebSocket connection closed.", event);
+                addTerminalLine("WebSocket connection closed.", 'warning');
                 statusDiv.textContent = 'Status: Disconnected. Please refresh.';
                 statusDiv.className = 'error';
                 runButton.disabled = true; // Disable button on disconnect
@@ -82,6 +323,7 @@
 
             socket.onerror = function(error) {
                 console.error("WebSocket error:", error);
+                addTerminalLine("WebSocket connection error.", 'error');
                 statusDiv.textContent = 'Status: Connection Error.';
                 statusDiv.className = 'error';
                 runButton.disabled = true;
@@ -96,27 +338,32 @@
                 const data = await response.json();
                 
                 if (data.image) {
-                    liveFeedImage.src = data.image;
-                    console.log(`Displaying ${data.filename} (${data.total_images} total images)`);
+                    updateImageDisplay(data.image);
+                    addTerminalLine(`Displaying ${data.filename} (${data.total_images} total images)`, 'info');
+                } else {
+                    updateImageDisplay(null);
                 }
             } catch (error) {
                 console.error("Failed to fetch latest image:", error);
+                addTerminalLine(`Failed to fetch latest image: ${error.message}`, 'error');
             }
         }
 
         // Event listener for the run button
         runButton.addEventListener('click', async () => {
             console.log("Requesting simulation start...");
+            addTerminalLine("Starting simulation...", 'info');
             runButton.disabled = true;
             statusDiv.textContent = 'Status: Requesting simulation start...';
             statusDiv.className = '';
-            liveFeedImage.src = ""; // Clear previous image
+            updateImageDisplay(null); // Clear previous image
 
             try {
                 // Tell the server to start the simulation
                 const response = await fetch('/run-simulation', { method: 'POST' });
                 const data = await response.json();
                 console.log("Simulation start request sent:", data.message);
+                addTerminalLine(`Simulation start request sent: ${data.message}`, 'success');
                 
                 // Start polling for images every 500ms
                 imagePollingInterval = setInterval(fetchLatestImage, 500);
@@ -124,11 +371,13 @@
                 // Ensure WebSocket is connected (or try connecting if not)
                 if (!socket || socket.readyState !== WebSocket.OPEN) {
                     console.log("WebSocket not open, attempting connection...");
+                    addTerminalLine("WebSocket not open, attempting connection...", 'warning');
                     connectWebSocket(); 
                 }
 
             } catch (error) {
                 console.error("Failed to send start simulation request:", error);
+                addTerminalLine(`Failed to send start simulation request: ${error.message}`, 'error');
                 statusDiv.textContent = 'Status: Error starting simulation.';
                 statusDiv.className = 'error';
                 runButton.disabled = false;
@@ -138,13 +387,21 @@
         // Refresh button handler
         refreshButton.addEventListener('click', () => {
             console.log("Manually refreshing image...");
+            addTerminalLine("Manually refreshing image...", 'info');
             fetchLatestImage();
         });
 
+        // Clear terminal button handler
+        clearTerminalButton.addEventListener('click', () => {
+            clearTerminal();
+        });
+
         // Initial WebSocket connection when the page loads
+        addTerminalLine("Initializing system...", 'info');
         connectWebSocket();
         
         // Load the latest image when page loads (if any exists)
+        addTerminalLine("Loading latest image...", 'info');
         fetchLatestImage();
 
     </script>
