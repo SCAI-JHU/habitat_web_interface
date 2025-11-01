@@ -114,7 +114,7 @@ async def stream_trajectory_images(trajectory_base_dir):
                     if idx % 10 == 0:  # Log every 10th image
                         print(f"[IMAGE_STREAM] Sent image {idx}")
             
-            await asyncio.sleep(0.5)  # Check for new images twice per second
+            await asyncio.sleep(4)  # Check for new images twice per second
             
         except Exception as e:
             print(f"[IMAGE_STREAM] Error: {e}")
