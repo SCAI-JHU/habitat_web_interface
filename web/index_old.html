@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>SCAI Lab Simulation Control Panel</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        /* Custom scrollbar styles (Tailwind doesn't style these by default) */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #111827; /* gray-900 */
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #374151; /* gray-700 */
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #4b5563; /* gray-600 */
+        }
+        
+        /* Chart.js responsiveness */
+        .chart-container {
+            position: relative;
+            height: 200px;
+            width: 100%;
+        }
+
+        /* Terminal-specific line styling */
+        .terminal-line { margin: 2px 0; word-wrap: break-word; }
+        .terminal-timestamp { color: #6b7280; margin-right: 10px; }
+        .terminal-prompt { color: #9ca3af; margin-right: 6px; }
+
+        /* Log-specific line styling */
+        .log-line { margin: 1px 0; word-wrap: break-word; font-size: 11px; }
+        .log-timestamp { color: #6b7280; margin-right: 8px; }
+        .log-level-info { color: #60a5fa; }
+        .log-level-warn { color: #facc15; }
+        .log-level-error { color: #f87171; }
+        .log-level-debug { color: #a78bfa; }
+    </style>
+</head>
+
+<body class="font-sans m-0 bg-gray-900 text-gray-200 flex h-screen overflow-hidden">
+    <!-- Original vanilla JS/HTML implementation -->
+    <!-- This file is kept for reference. The new React TypeScript version is in src/ -->
+</body>
+</html>
+

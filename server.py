@@ -24,7 +24,9 @@ connected_clients: list[WebSocket] = []
 
 # --- Directory and Script Paths ---
 PROJECT_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-WEB_DIR = os.path.join(PROJECT_ROOT_DIR, "web")
+# Check if React build exists, otherwise use web directory
+WEB_DIST_DIR = os.path.join(PROJECT_ROOT_DIR, "web", "dist")
+WEB_DIR = WEB_DIST_DIR if os.path.exists(WEB_DIST_DIR) else os.path.join(PROJECT_ROOT_DIR, "web")
 SIMULATION_SCRIPT = "habitat_llm/examples/scene_mapping.py"
 
 # --- WebSocket Endpoint ---
@@ -290,4 +292,5 @@ async def get_latest_image():
 
 # --- Static File Serving ---
 # Mount last so it doesn't override your API endpoints
+print(f"Serving web interface from: {WEB_DIR}")
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="static")

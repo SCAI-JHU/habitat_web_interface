@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar styles */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #111827; /* gray-900 */
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #374151; /* gray-700 */
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #4b5563; /* gray-600 */
+}
+
+/* Chart container */
+.chart-container {
+  position: relative;
+  height: 200px;
+  width: 100%;
+}
+
+/* Terminal and log styling */
+.terminal-line {
+  margin: 2px 0;
+  word-wrap: break-word;
+}
+
+.log-line {
+  margin: 1px 0;
+  word-wrap: break-word;
+  font-size: 11px;
+}
+
