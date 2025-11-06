@@ -5,13 +5,19 @@ import asyncio # For handling subprocess streams
 import sys # To find the python executable
 import glob
 import base64
+from typing import Union
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect # Import WebSocket components
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request # Import WebSocket components
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 # Initialize the FastAPI app
 app = FastAPI()
+
+# Pydantic model for robot commands
+class RobotCommand(BaseModel):
+    command: str
 
 # --- Global State Management ---
 simulation_status = {
@@ -20,6 +26,9 @@ simulation_status = {
 }
 # Keep track of connected WebSocket clients
 connected_clients: list[WebSocket] = []
+# Command queue for robot control (will be initialized in startup)
+robot_command_queue: Union[asyncio.Queue, None] = None
+simulation_process: Union[asyncio.subprocess.Process, None] = None
 
 
 # --- Directory and Script Paths ---
@@ -27,7 +36,7 @@ PROJECT_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Check if React build exists, otherwise use web directory
 WEB_DIST_DIR = os.path.join(PROJECT_ROOT_DIR, "web", "dist")
 WEB_DIR = WEB_DIST_DIR if os.path.exists(WEB_DIST_DIR) else os.path.join(PROJECT_ROOT_DIR, "web")
-SIMULATION_SCRIPT = "habitat_llm/examples/scene_mapping.py"
+SIMULATION_SCRIPT = "habitat_llm/examples/controllable_simulation.py"
 
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/live_feed")
@@ -138,20 +147,35 @@ async def run_simulation_process():
     if "CUDA_VISIBLE_DEVICES" not in env: env["CUDA_VISIBLE_DEVICES"] = habitat_gpu_id
     if "EGL_DEVICE_ID" not in env: env["EGL_DEVICE_ID"] = habitat_gpu_id
 
-    print(f"Running habitat simulation script: {SIMULATION_SCRIPT}")
-    print(f"GPU Configuration: CUDA={env.get('CUDA_VISIBLE_DEVICES')}, EGL={env.get('EGL_DEVICE_ID')}")
+    script_path = os.path.join(PROJECT_ROOT_DIR, SIMULATION_SCRIPT)
+    if not os.path.exists(script_path):
+        error_msg = f"Simulation script not found: {script_path}"
+        print(f"[ERROR] {error_msg}")
+        simulation_status = {"status": "error", "message": error_msg}
+        await broadcast_message(f"status:error:{error_msg}")
+        return
+    
+    print(f"[SERVER] Running habitat simulation script: {SIMULATION_SCRIPT}")
+    print(f"[SERVER] Full path: {script_path}")
+    print(f"[SERVER] GPU Configuration: CUDA={env.get('CUDA_VISIBLE_DEVICES')}, EGL={env.get('EGL_DEVICE_ID')}")
 
+    global simulation_process
     process = None # Define process variable outside try block
     try:
         # Use asyncio's subprocess handling for non-blocking I/O
+        # Use absolute path to ensure we're running the right script
+        script_abs_path = os.path.join(PROJECT_ROOT_DIR, SIMULATION_SCRIPT)
+        print(f"[SERVER] Executing: {sys.executable} {script_abs_path}")
         process = await asyncio.create_subprocess_exec(
             sys.executable, # Use the same python interpreter running the server
-            SIMULATION_SCRIPT,
+            script_abs_path, # Use absolute path to script
+            stdin=asyncio.subprocess.PIPE, # Allow sending commands via stdin
             stdout=asyncio.subprocess.PIPE, # Capture standard output
             stderr=asyncio.subprocess.PIPE, # Capture standard error
             cwd=PROJECT_ROOT_DIR, # Run script from the project root
             env=env # Pass the configured environment
         )
+        print(f"[SERVER] Simulation process started with PID: {process.pid}")
 
         # Process stdout and stderr streams concurrently
         async def stream_output(stream, stream_name):
@@ -183,15 +207,71 @@ async def run_simulation_process():
                     # Send status/error updates over WebSocket
                     await broadcast_message(f"{status_prefix}{line[:200]}") # Send truncated status
 
+        # Store process reference globally
+        simulation_process = process
+        
+        # Command forwarding task
+        async def forward_commands():
+            """Forward queued commands to the simulation process via stdin."""
+            try:
+                print(f"[ROBOT_CMD] Command forwarding task started. Process stdin: {process.stdin is not None}")
+                while process.returncode is None:
+                    try:
+                        # Wait for a command with timeout
+                        if robot_command_queue is not None:
+                            try:
+                                command = await asyncio.wait_for(robot_command_queue.get(), timeout=0.1)
+                                if process.stdin is None:
+                                    print(f"[ROBOT_CMD] ERROR: process.stdin is None, cannot send command: {command}")
+                                    continue
+                                
+                                # Check if stdin is closed
+                                if process.stdin.is_closing():
+                                    print(f"[ROBOT_CMD] ERROR: stdin is closing, cannot send command: {command}")
+                                    break
+                                
+                                command_bytes = f"{command}\n".encode('utf-8')
+                                process.stdin.write(command_bytes)
+                                await process.stdin.drain()
+                                print(f"[ROBOT_CMD] Successfully sent command to simulation: {command}")
+                            except asyncio.TimeoutError:
+                                # No command available, continue waiting
+                                continue
+                            except BrokenPipeError as e:
+                                print(f"[ROBOT_CMD] Broken pipe error (stdin closed): {e}")
+                                break
+                            except OSError as e:
+                                print(f"[ROBOT_CMD] OS error writing to stdin: {e}")
+                                break
+                        else:
+                            await asyncio.sleep(0.1)
+                    except Exception as e:
+                        print(f"[ROBOT_CMD] Error forwarding command: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        break
+            except Exception as e:
+                print(f"[ROBOT_CMD] Command forwarding task error: {e}")
+                import traceback
+                traceback.print_exc()
+        
         # Start image streaming task
         trajectory_dir = os.path.join(PROJECT_ROOT_DIR, "data/trajectories")
         image_stream_task = asyncio.create_task(stream_trajectory_images(trajectory_dir))
+        command_forward_task = asyncio.create_task(forward_commands())
         
         # Run stream readers concurrently (but not image streaming yet)
         await asyncio.gather(
             stream_output(process.stdout, "STDOUT"),
             stream_output(process.stderr, "STDERR")
         )
+        
+        # Cancel command forwarding task
+        command_forward_task.cancel()
+        try:
+            await command_forward_task
+        except asyncio.CancelledError:
+            pass
 
         # Wait for the process to fully exit and get the return code
         await process.wait()
@@ -227,6 +307,9 @@ async def run_simulation_process():
             simulation_status = {"status": "error", "message": error_msg}
             await broadcast_message(f"status:error:{error_msg}") # Send final error status
     finally:
+        # Clear global process reference
+        simulation_process = None
+        
         # Ensure process is terminated if something went wrong unexpectedly
         if process and process.returncode is None:
             print("Terminating simulation process...")
@@ -256,6 +339,62 @@ async def start_simulation_endpoint(): # <-- Needs to be async
 async def get_status():
     """Returns the current status (less critical now with WebSockets)."""
     return JSONResponse(simulation_status)
+
+@app.post("/robot-command")
+async def robot_command_endpoint(command: RobotCommand):
+    """Receives robot control commands and queues them for the simulation."""
+    global simulation_process, robot_command_queue
+    
+    if robot_command_queue is None:
+        return JSONResponse(
+            {"error": "Command queue not initialized"}, 
+            status_code=500
+        )
+    
+    if simulation_status["status"] != "running":
+        return JSONResponse(
+            {"error": "Simulation is not running"}, 
+            status_code=400
+        )
+    
+    if simulation_process is None:
+        return JSONResponse(
+            {"error": "Simulation process is not active (None)"}, 
+            status_code=400
+        )
+    
+    if simulation_process.returncode is not None:
+        return JSONResponse(
+            {"error": f"Simulation process has exited with code {simulation_process.returncode}"}, 
+            status_code=400
+        )
+    
+    # Check if stdin is available
+    if simulation_process.stdin is None:
+        return JSONResponse(
+            {"error": "Simulation process stdin is not available"}, 
+            status_code=500
+        )
+    
+    if simulation_process.stdin.is_closing():
+        return JSONResponse(
+            {"error": "Simulation process stdin is closing"}, 
+            status_code=500
+        )
+    
+    try:
+        # Queue the command to be sent to the simulation process
+        await robot_command_queue.put(command.command)
+        print(f"[ROBOT_CMD] Queued command: {command.command} (queue size will increase)")
+        return JSONResponse({"message": f"Command '{command.command}' queued successfully"})
+    except Exception as e:
+        print(f"[ROBOT_CMD] Error queueing command: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            {"error": f"Failed to queue command: {str(e)}"}, 
+            status_code=500
+        )
 
 @app.get("/latest-image")
 async def get_latest_image():
@@ -289,6 +428,14 @@ async def get_latest_image():
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+# --- Startup Event ---
+@app.on_event("startup")
+async def startup_event():
+    """Initialize resources on startup."""
+    global robot_command_queue
+    robot_command_queue = asyncio.Queue()
+    print("[SERVER] Initialized robot command queue")
 
 # --- Static File Serving ---
 # Mount last so it doesn't override your API endpoints

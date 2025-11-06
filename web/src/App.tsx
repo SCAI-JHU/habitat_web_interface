@@ -5,6 +5,7 @@ import { LiveFeed } from './components/LiveFeed';
 import { Metrics } from './components/Metrics';
 import { Terminal } from './components/Terminal';
 import { SystemLogs } from './components/SystemLogs';
+import { RobotControl } from './components/RobotControl';
 import { useWebSocket } from './hooks/useWebSocket';
 import { getCurrentTime, generateId } from './utils/helpers';
 import { AppState, StatusType, MessageType, LogLevel, TerminalLine, SystemLogLine } from './types';
@@ -209,6 +210,42 @@ function App() {
     addSystemLog('System logs cleared.', 'INFO');
   }, [addSystemLog]);
 
+  // Handle robot control commands
+  const handleRobotCommand = useCallback(async (command: string) => {
+    if (!state.isRunning) {
+      console.log('Simulation not running, ignoring command:', command);
+      return;
+    }
+    
+    try {
+      const response = await fetch('/robot-command', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ command }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        // Show the actual error message from the server
+        const errorMsg = data.error || response.statusText || 'Unknown error';
+        console.error(`Failed to send command "${command}":`, errorMsg);
+        addTerminalLine(`Failed to send command "${command}": ${errorMsg}`, 'error');
+        return;
+      }
+      
+      // Success
+      console.log(`Command "${command}" sent successfully:`, data.message);
+      addTerminalLine(`Robot command: ${command}`, 'info');
+    } catch (error) {
+      console.error('Failed to send robot command:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      addTerminalLine(`Failed to send robot command "${command}": ${errorMessage}`, 'error');
+    }
+  }, [state.isRunning, addTerminalLine]);
+
   // Initialize app
   useEffect(() => {
     addTerminalLine('Initializing system...', 'info');
@@ -252,6 +289,7 @@ function App() {
         <div className="flex-1 p-4 grid grid-cols-1 lg:grid-cols-5 gap-4 overflow-y-auto custom-scrollbar">
           <div className="lg:col-span-3 flex flex-col space-y-4">
             <LiveFeed imageSrc={state.imageSrc} />
+            <RobotControl onCommand={handleRobotCommand} isRunning={state.isRunning} />
             <Metrics metrics={state.metrics} />
           </div>
 
