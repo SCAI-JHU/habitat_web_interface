@@ -2,6 +2,7 @@ import React from 'react';
 
 interface SidebarProps {
   onRunSimulation: () => void;
+  onStopSimulation: () => void;
   onRefreshImage: () => void;
   onClearTerminal: () => void;
   onClearLogs: () => void;
@@ -10,6 +11,7 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({
   onRunSimulation,
+  onStopSimulation,
   onRefreshImage,
   onClearTerminal,
   onClearLogs,
@@ -28,6 +30,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="w-full bg-blue-600 text-white py-2 px-4 rounded-md font-medium hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed"
             >
               Run Simulation
+            </button>
+            <button
+              onClick={onStopSimulation}
+              disabled={!isRunning}
+              className="w-full bg-red-600 text-white py-2 px-4 rounded-md font-medium hover:bg-red-500 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed"
+            >
+              Stop Simulation
             </button>
             <button
               onClick={onRefreshImage}

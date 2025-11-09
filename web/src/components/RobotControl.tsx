@@ -20,7 +20,7 @@ const CONTROL_MAPPING: Record<string, ControlKey> = {
 
 const KEY_LABELS: Record<ControlKey, string> = {
   forward: 'W - Forward',
-  backward: 'S - Backward',
+  backward: 'S - Back',
   left: 'A - Left',
   right: 'D - Right',
   arm_up: 'E - Arm Up',
@@ -71,18 +71,19 @@ export const RobotControl = ({ onCommand, isRunning }: RobotControlProps) => {
   }, [isKeyboardMode, isRunning, handleKeyDown, handleKeyUp]);
 
   const handleButtonClick = (command: ControlKey) => {
-    if (isRunning) {
-      console.log(`Button clicked: ${command}`);
-      onCommand(command);
-      // For movement commands, send a stop command after a short delay to make it discrete
-      if (command !== 'stop' && (command === 'forward' || command === 'backward' || command === 'left' || command === 'right')) {
-        setTimeout(() => {
-          console.log(`Auto-stopping after ${command}`);
-          onCommand('stop');
-        }, 200); // 200ms delay for discrete movement
-      }
-    } else {
-      console.log('Simulation not running, ignoring command');
+    console.log(`Robot control button: ${command} (sim running: ${isRunning})`);
+    onCommand(command);
+
+    // For movement commands during an active sim, send a short stop impulse
+    if (
+      isRunning &&
+      command !== 'stop' &&
+      (command === 'forward' || command === 'backward' || command === 'left' || command === 'right')
+    ) {
+      setTimeout(() => {
+        console.log(`Auto-stopping after ${command}`);
+        onCommand('stop');
+      }, 250); // 250ms delay for discrete movement
     }
   };
 
@@ -104,8 +105,8 @@ export const RobotControl = ({ onCommand, isRunning }: RobotControlProps) => {
       </div>
 
       {!isRunning && (
-        <div className="text-yellow-500 text-sm mb-4">
-          Start simulation to enable controls
+        <div className="text-yellow-400 text-sm mb-4">
+          Simulation not marked as running. Commands will still be sent, but the backend may reject them until the sim is ready.
         </div>
       )}
 
@@ -138,40 +139,43 @@ export const RobotControl = ({ onCommand, isRunning }: RobotControlProps) => {
               <div></div>
               <button
                 onClick={() => handleButtonClick('forward')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-medium"
+                className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                  isRunning ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-900 text-blue-200'
+                }`}
               >
                 ↑ Forward
               </button>
               <div></div>
               <button
                 onClick={() => handleButtonClick('left')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-medium"
+                className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                  isRunning ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-900 text-blue-200'
+                }`}
               >
                 ← Left
               </button>
               <button
                 onClick={() => handleButtonClick('stop')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-red-700 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-bold"
+                className="px-3 py-2 bg-red-700 hover:bg-red-800 text-white rounded text-sm font-bold transition-colors"
               >
                 ⏹ Stop
               </button>
               <button
                 onClick={() => handleButtonClick('right')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-medium"
+                className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                  isRunning ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-900 text-blue-200'
+                }`}
               >
                 → Right
               </button>
               <div></div>
               <button
                 onClick={() => handleButtonClick('backward')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-medium"
+                className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                  isRunning ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-900 text-blue-200'
+                }`}
               >
-                ↓ Backward
+                ↓ Back
               </button>
               <div></div>
             </div>
@@ -183,15 +187,17 @@ export const RobotControl = ({ onCommand, isRunning }: RobotControlProps) => {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => handleButtonClick('arm_up')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-medium"
+                className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                  isRunning ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-green-900 text-green-200'
+                }`}
               >
                 ↑ Arm Up
               </button>
               <button
                 onClick={() => handleButtonClick('arm_down')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-medium"
+                className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                  isRunning ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-green-900 text-green-200'
+                }`}
               >
                 ↓ Arm Down
               </button>
@@ -204,15 +210,17 @@ export const RobotControl = ({ onCommand, isRunning }: RobotControlProps) => {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => handleButtonClick('grip_open')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-medium"
+                className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                  isRunning ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-purple-900 text-purple-200'
+                }`}
               >
                 ✋ Open
               </button>
               <button
                 onClick={() => handleButtonClick('grip_close')}
-                disabled={!isRunning}
-                className="px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm font-medium"
+                className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                  isRunning ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-purple-900 text-purple-200'
+                }`}
               >
                 ✊ Close
               </button>

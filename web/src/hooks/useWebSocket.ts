@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { WS_HOST } from '../config';
 
 interface UseWebSocketProps {
   onMessage: (message: string) => void;
@@ -21,7 +22,7 @@ export const useWebSocket = ({ onMessage, onOpen, onClose, onError }: UseWebSock
     }
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${wsProtocol}://${window.location.host}/ws/live_feed`;
+    const wsUrl = `${wsProtocol}://${WS_HOST}/ws/live_feed`;
 
     console.log(`Connecting to WebSocket: ${wsUrl} (attempt ${reconnectAttemptsRef.current + 1})`);
     

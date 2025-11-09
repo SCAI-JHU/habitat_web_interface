@@ -9,8 +9,16 @@ import { RobotControl } from './components/RobotControl';
 import { useWebSocket } from './hooks/useWebSocket';
 import { getCurrentTime, generateId } from './utils/helpers';
 import { AppState, StatusType, MessageType, LogLevel, TerminalLine, SystemLogLine } from './types';
+import { API_BASE } from './config';
 
 const INITIAL_METRICS = Array(20).fill(0);
+const MOVEMENT_PATH_MAP: Record<string, string> = {
+  forward: 'forward',
+  backward: 'back',
+  left: 'left',
+  right: 'right',
+  stop: 'stop',
+};
 
 function App() {
   const [state, setState] = useState<AppState>({
@@ -92,7 +100,10 @@ function App() {
         setStatus(`${statusType} - ${statusMessage}`, statusType as StatusType);
         addTerminalLine(`[${statusType.toUpperCase()}] ${statusMessage}`, statusType as MessageType);
 
-        if (statusType === 'complete' || statusType === 'error') {
+        // Update isRunning based on status
+        if (statusType === 'running') {
+          setState(prev => ({ ...prev, isRunning: true }));
+        } else if (statusType === 'complete' || statusType === 'error') {
           setState(prev => ({ ...prev, isRunning: false }));
           if (imagePollingIntervalRef.current) {
             clearInterval(imagePollingIntervalRef.current);
@@ -142,10 +153,15 @@ function App() {
     }
   });
 
+  const buildUrl = useCallback(
+    (path: string) => (API_BASE ? `${API_BASE}${path}` : path),
+    []
+  );
+
   // Fetch latest image
   const fetchLatestImage = useCallback(async () => {
     try {
-      const response = await fetch('/latest-image');
+      const response = await fetch(buildUrl('/latest-image'));
       const data = await response.json();
 
       if (data.image) {
@@ -160,7 +176,7 @@ function App() {
       addTerminalLine(`Failed to fetch latest image: ${errorMessage}`, 'error');
       addSystemLog(`Failed to fetch latest image: ${errorMessage}`, 'ERROR');
     }
-  }, [addTerminalLine, addSystemLog, updateImageDisplay]);
+  }, [addTerminalLine, addSystemLog, updateImageDisplay, buildUrl]);
 
   // Handle run simulation
   const handleRunSimulation = useCallback(async () => {
@@ -172,7 +188,7 @@ function App() {
     updateImageDisplay(null);
 
     try {
-      const response = await fetch('/run-simulation', { method: 'POST' });
+      const response = await fetch(buildUrl('/run-simulation'), { method: 'POST' });
       const data = await response.json();
       console.log('Simulation start request sent:', data.message);
       addTerminalLine(`Simulation start request sent: ${data.message}`, 'success');
@@ -190,7 +206,30 @@ function App() {
       setStatus('Error starting simulation.', 'error');
       setState(prev => ({ ...prev, isRunning: false }));
     }
-  }, [addTerminalLine, addSystemLog, setStatus, updateImageDisplay, fetchLatestImage]);
+  }, [addTerminalLine, addSystemLog, setStatus, updateImageDisplay, fetchLatestImage, buildUrl]);
+
+  const handleStopSimulation = useCallback(async () => {
+    console.log('Requesting simulation stop...');
+    addTerminalLine('Stopping simulation...', 'info');
+    addSystemLog('Simulation stop requested by user.', 'INFO');
+
+    try {
+      const response = await fetch(buildUrl('/stop-simulation'), { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || response.statusText);
+      }
+      addTerminalLine(`Simulation stop request: ${data.message}`, 'info');
+      addSystemLog(`Server responded: ${data.message}`, 'INFO');
+      setStatus('Simulation stopped.', 'info');
+      setState(prev => ({ ...prev, isRunning: false }));
+    } catch (error) {
+      console.error('Failed to stop simulation:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      addTerminalLine(`Failed to stop simulation: ${errorMessage}`, 'error');
+      addSystemLog(`Failed to stop simulation: ${errorMessage}`, 'ERROR');
+    }
+  }, [addTerminalLine, addSystemLog, setStatus, buildUrl]);
 
   // Handle clear terminal
   const handleClearTerminal = useCallback(() => {
@@ -213,38 +252,52 @@ function App() {
   // Handle robot control commands
   const handleRobotCommand = useCallback(async (command: string) => {
     if (!state.isRunning) {
-      console.log('Simulation not running, ignoring command:', command);
-      return;
+      console.log('Sending command even though sim not marked running:', command);
     }
-    
+
     try {
-      const response = await fetch('/robot-command', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ command }),
-      });
-      
-      const data = await response.json();
+      let response: Response;
+      let data: any;
+
+      if (command in MOVEMENT_PATH_MAP) {
+        const direction = MOVEMENT_PATH_MAP[command] || command;
+        response = await fetch(buildUrl(`/move/${direction}`), {
+          method: 'POST',
+        });
+      } else {
+        response = await fetch(buildUrl('/robot-command'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ command }),
+        });
+      }
+
+      // Attempt to parse JSON response for better error messaging
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
+      }
       
       if (!response.ok) {
         // Show the actual error message from the server
-        const errorMsg = data.error || response.statusText || 'Unknown error';
+        const errorMsg = data?.error || response.statusText || 'Unknown error';
         console.error(`Failed to send command "${command}":`, errorMsg);
         addTerminalLine(`Failed to send command "${command}": ${errorMsg}`, 'error');
         return;
       }
       
       // Success
-      console.log(`Command "${command}" sent successfully:`, data.message);
+      console.log(`Command "${command}" sent successfully:`, data?.message || 'OK');
       addTerminalLine(`Robot command: ${command}`, 'info');
     } catch (error) {
       console.error('Failed to send robot command:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       addTerminalLine(`Failed to send robot command "${command}": ${errorMessage}`, 'error');
     }
-  }, [state.isRunning, addTerminalLine]);
+  }, [state.isRunning, addTerminalLine, buildUrl]);
 
   // Initialize app
   useEffect(() => {
@@ -277,6 +330,7 @@ function App() {
     <div className="font-sans m-0 bg-gray-900 text-gray-200 flex h-screen overflow-hidden">
       <Sidebar
         onRunSimulation={handleRunSimulation}
+        onStopSimulation={handleStopSimulation}
         onRefreshImage={fetchLatestImage}
         onClearTerminal={handleClearTerminal}
         onClearLogs={handleClearLogs}
