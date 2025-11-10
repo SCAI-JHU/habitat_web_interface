@@ -5,11 +5,7 @@ import asyncio # For handling subprocess streams
 import sys # To find the python executable
 import glob
 import base64
-import binascii
-import datetime
-import shutil
-from pathlib import Path
-from typing import Union, Optional
+from typing import Union
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request # Import WebSocket components
 from fastapi.responses import JSONResponse
@@ -41,76 +37,6 @@ PROJECT_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIST_DIR = os.path.join(PROJECT_ROOT_DIR, "web", "dist")
 WEB_DIR = WEB_DIST_DIR if os.path.exists(WEB_DIST_DIR) else os.path.join(PROJECT_ROOT_DIR, "web")
 SIMULATION_SCRIPT = "habitat_llm/examples/controllable_simulation.py"
-
-# --- Live frame storage configuration ---
-LIVE_FRAMES_BASE_DIR = Path(PROJECT_ROOT_DIR) / "data" / "live_frames"
-LIVE_FRAMES_BASE_DIR.mkdir(parents=True, exist_ok=True)
-LIVE_FRAMES_CURRENT_SYMLINK = LIVE_FRAMES_BASE_DIR / "current"
-live_frame_session_dir: Optional[Path] = None
-live_frame_counter = 0
-live_frame_lock = asyncio.Lock()
-
-
-def _reset_live_frame_directory():
-    """
-    Prepare a fresh directory to persist the current simulation's live frames.
-    Also updates the `current` symlink so tooling/frontends can find the latest run.
-    """
-    global live_frame_session_dir, live_frame_counter
-
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    session_dir = LIVE_FRAMES_BASE_DIR / timestamp
-
-    if session_dir.exists():
-        shutil.rmtree(session_dir)
-    session_dir.mkdir(parents=True, exist_ok=True)
-
-    # Update "current" symlink atomically
-    if LIVE_FRAMES_CURRENT_SYMLINK.exists() or LIVE_FRAMES_CURRENT_SYMLINK.is_symlink():
-        LIVE_FRAMES_CURRENT_SYMLINK.unlink()
-    LIVE_FRAMES_CURRENT_SYMLINK.symlink_to(session_dir, target_is_directory=True)
-
-    live_frame_session_dir = session_dir
-    live_frame_counter = 0
-    print(f"[LIVE_FRAMES] Writing frames to {session_dir}")
-
-
-async def _persist_frame_from_data_url(data_url: str):
-    """
-    Decode a data URL emitted by the simulation and persist it to disk.
-    """
-    if not data_url.startswith("data:image"):
-        return
-
-    global live_frame_session_dir, live_frame_counter
-    if live_frame_session_dir is None:
-        _reset_live_frame_directory()
-
-    try:
-        header, encoded = data_url.split(",", 1)
-    except ValueError:
-        print("[LIVE_FRAMES] Malformed data URL; skipping frame")
-        return
-
-    extension = "png"
-    if "image/jpeg" in header or "image/jpg" in header:
-        extension = "jpg"
-    elif "image/webp" in header:
-        extension = "webp"
-
-    try:
-        raw_bytes = base64.b64decode(encoded, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        print(f"[LIVE_FRAMES] Failed to decode frame: {exc}")
-        return
-
-    async with live_frame_lock:
-        frame_index = live_frame_counter
-        live_frame_counter += 1
-        destination = live_frame_session_dir / f"frame_{frame_index:06d}.{extension}"
-
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, destination.write_bytes, raw_bytes)
 
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/live_feed")
@@ -212,7 +138,6 @@ async def run_simulation_process():
 
     simulation_status = {"status": "running", "message": "Simulation starting..."}
     await broadcast_message("status:running:Simulation starting...") # Send status update via WebSocket
-    _reset_live_frame_directory()
 
     # Configure GPU environment variables for the subprocess
     env = os.environ.copy()
@@ -241,70 +166,33 @@ async def run_simulation_process():
         # Use absolute path to ensure we're running the right script
         script_abs_path = os.path.join(PROJECT_ROOT_DIR, SIMULATION_SCRIPT)
         print(f"[SERVER] Executing: {sys.executable} {script_abs_path}")
-        
-        # Increased limit to 20MB to handle large base64 images.
-        # The 'limit' parameter controls the buffer size for StreamReader.
         process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            script_abs_path,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=PROJECT_ROOT_DIR,
-            env=env,
-            limit=20 * 1024 * 1024  # <-- CRITICAL FIX: 20MB buffer limit
+            sys.executable, # Use the same python interpreter running the server
+            script_abs_path, # Use absolute path to script
+            stdin=asyncio.subprocess.PIPE, # Allow sending commands via stdin
+            stdout=asyncio.subprocess.PIPE, # Capture standard output
+            stderr=asyncio.subprocess.PIPE, # Capture standard error
+            cwd=PROJECT_ROOT_DIR, # Run script from the project root
+            env=env # Pass the configured environment
         )
-        # ------------------------
-
         print(f"[SERVER] Simulation process started with PID: {process.pid}")
 
         # Process stdout and stderr streams concurrently
         async def stream_output(stream, stream_name):
             while True:
-                try:
-                    line_bytes = await stream.readline()
-                except ValueError as e:
-                    print(f"[SERVER] ERROR reading from {stream_name}: {e}")
-                    continue
-
+                line_bytes = await stream.readline()
                 if not line_bytes:
                     break # End of this stream
-                line = line_bytes.decode('utf-8', errors='replace').strip()
+                line = line_bytes.decode('utf-8').strip()
 
                 # Check if the line is a Base64 image data URI (from stdout)
-                if stream_name == "STDOUT" and line.startswith("data:image"):
+                if stream_name == "STDOUT" and line.startswith("data:image/png;base64,"):
                     await broadcast_message(line) # Send image data to clients
-                    await _persist_frame_from_data_url(line)
                 else:
                     # Process other output (status, debug, errors)
                     log_prefix = f"[Sim {stream_name}]"
                     status_prefix = "status:running:"
-                    # Filter out noisy plugin warnings
-                    if "PluginManager" in line or "gym/spaces/box.py" in line:
-                        print(f"{log_prefix} (info): {line}")
-                        continue
-
-                    normalized_line = line.lower()
-                    is_error = False
-
-                    # Treat genuine exceptions/tracebacks as errors, but allow informational stderr output
-                    if "traceback" in normalized_line or "exception" in normalized_line or "critical" in normalized_line or "fatal" in normalized_line:
-                        is_error = True
-
-                    if "[error" in normalized_line and not is_error:
-                        # Many controllable_sim messages use the word ERROR for emphasis; log as warning only
-                        print(f"{log_prefix} WARN: {line}")
-                        if "ready to receive commands" in normalized_line:
-                            simulation_status["status"] = "running"
-                            simulation_status["message"] = "Ready to receive commands."
-                            await broadcast_message("status:running:Ready to receive commands.")
-                        elif "robot is idle" in normalized_line:
-                            simulation_status["status"] = "running"
-                            simulation_status["message"] = "Robot is idle and awaiting commands."
-                            await broadcast_message("status:running:Robot idle; awaiting commands.")
-                        continue
-
-                    if is_error:
+                    if "[ERROR" in line or "Traceback" in line or stream_name == "STDERR":
                          print(f"{log_prefix} ERROR: {line}")
                          status_prefix = "status:error:" # Mark as error status
                          # Update global status immediately on error
@@ -315,17 +203,6 @@ async def run_simulation_process():
                          continue # Don't broadcast debug lines unless needed
                     else:
                          print(f"{log_prefix}: {line}") # Log other lines
-
-                    if "ready to receive commands" in normalized_line:
-                        simulation_status["status"] = "running"
-                        simulation_status["message"] = "Ready to receive commands."
-                        await broadcast_message("status:running:Ready to receive commands.")
-                        continue
-                    if "robot is idle" in normalized_line:
-                        simulation_status["status"] = "running"
-                        simulation_status["message"] = "Robot is idle and awaiting commands."
-                        await broadcast_message("status:running:Robot idle; awaiting commands.")
-                        continue
 
                     # Send status/error updates over WebSocket
                     await broadcast_message(f"{status_prefix}{line[:200]}") # Send truncated status
@@ -378,7 +255,9 @@ async def run_simulation_process():
                 import traceback
                 traceback.print_exc()
         
-        # Start command forwarding
+        # Start image streaming task
+        trajectory_dir = os.path.join(PROJECT_ROOT_DIR, "data/trajectories")
+        image_stream_task = asyncio.create_task(stream_trajectory_images(trajectory_dir))
         command_forward_task = asyncio.create_task(forward_commands())
         
         # Run stream readers concurrently (but not image streaming yet)
@@ -396,6 +275,13 @@ async def run_simulation_process():
 
         # Wait for the process to fully exit and get the return code
         await process.wait()
+        
+        # Cancel image streaming task
+        image_stream_task.cancel()
+        try:
+            await image_stream_task
+        except asyncio.CancelledError:
+            pass
 
         # Final status update based on return code
         if process.returncode == 0:
@@ -449,184 +335,95 @@ async def start_simulation_endpoint(): # <-- Needs to be async
     return {"message": "Simulation process started in background."}
 
 
-@app.post("/stop-simulation")
-async def stop_simulation_endpoint():
-    """Stops the currently running simulation if there is one."""
-    global simulation_process, simulation_status, robot_command_queue
-
-    if simulation_process is None or simulation_process.returncode is not None:
-        simulation_status = {"status": "idle", "message": "No active simulation."}
-        await broadcast_message("status:idle:No active simulation.")
-        robot_command_queue = asyncio.Queue()
-        return {"message": "No running simulation."}
-
-    simulation_status = {"status": "stopping", "message": "Stopping simulation..."}
-    await broadcast_message("status:stopping:Stopping simulation...")
-
-    try:
-        try:
-            simulation_process.terminate()
-        except ProcessLookupError:
-            pass
-
-        try:
-            await asyncio.wait_for(simulation_process.wait(), timeout=10)
-        except asyncio.TimeoutError:
-            try:
-                simulation_process.kill()
-                await simulation_process.wait()
-            except ProcessLookupError:
-                pass
-
-        simulation_process = None
-        robot_command_queue = asyncio.Queue()
-        simulation_status = {"status": "idle", "message": "Simulation stopped."}
-        await broadcast_message("status:idle:Simulation stopped.")
-        return {"message": "Simulation stopped."}
-    except Exception as e:
-        error_msg = f"Failed to stop simulation: {e}"
-        print(error_msg)
-        simulation_status = {"status": "error", "message": error_msg}
-        await broadcast_message(f"status:error:{error_msg[:200]}")
-        return JSONResponse({"error": error_msg}, status_code=500)
-
-
 @app.get("/status")
 async def get_status():
     """Returns the current status (less critical now with WebSockets)."""
-    # Add debug info
-    debug_info = {
-        **simulation_status,
-        "simulation_process_exists": simulation_process is not None,
-        "simulation_process_pid": simulation_process.pid if simulation_process else None,
-        "simulation_process_returncode": simulation_process.returncode if simulation_process else None,
-        "queue_initialized": robot_command_queue is not None,
-    }
-    return JSONResponse(debug_info)
+    return JSONResponse(simulation_status)
 
 @app.post("/robot-command")
 async def robot_command_endpoint(command: RobotCommand):
     """Receives robot control commands and queues them for the simulation."""
-    payload, status = await _queue_robot_command(command.command, source="json-endpoint")
-    return JSONResponse(payload, status_code=status)
-
-
-async def _queue_robot_command(command_str: str, source: str = "api"):
-    """Internal helper that enqueues a robot command after validating backend state."""
     global simulation_process, robot_command_queue
-
-    print(f"[ROBOT_CMD] Command received from {source}: {command_str}")
-
+    
     if robot_command_queue is None:
-        print("[ROBOT_CMD] Rejecting command: queue not initialized")
-        return {"error": "Command queue not initialized"}, 500
-
+        return JSONResponse(
+            {"error": "Command queue not initialized"}, 
+            status_code=500
+        )
+    
     if simulation_status["status"] != "running":
-        print(f"[ROBOT_CMD] Rejecting command: status={simulation_status['status']}, message={simulation_status.get('message')}")
-        return {"error": "Simulation is not running"}, 400
-
+        return JSONResponse(
+            {"error": "Simulation is not running"}, 
+            status_code=400
+        )
+    
     if simulation_process is None:
-        print("[ROBOT_CMD] Rejecting command: simulation_process is None")
-        return {"error": "Simulation process is not active (None)"}, 400
-
+        return JSONResponse(
+            {"error": "Simulation process is not active (None)"}, 
+            status_code=400
+        )
+    
     if simulation_process.returncode is not None:
-        print(f"[ROBOT_CMD] Rejecting command: process exited with {simulation_process.returncode}")
-        return {"error": f"Simulation process has exited with code {simulation_process.returncode}"}, 400
-
+        return JSONResponse(
+            {"error": f"Simulation process has exited with code {simulation_process.returncode}"}, 
+            status_code=400
+        )
+    
     # Check if stdin is available
     if simulation_process.stdin is None:
-        print("[ROBOT_CMD] Rejecting command: process stdin missing")
-        return {"error": "Simulation process stdin is not available"}, 500
-
+        return JSONResponse(
+            {"error": "Simulation process stdin is not available"}, 
+            status_code=500
+        )
+    
     if simulation_process.stdin.is_closing():
-        print("[ROBOT_CMD] Rejecting command: process stdin closing")
-        return {"error": "Simulation process stdin is closing"}, 500
-
+        return JSONResponse(
+            {"error": "Simulation process stdin is closing"}, 
+            status_code=500
+        )
+    
     try:
         # Queue the command to be sent to the simulation process
-        await robot_command_queue.put(command_str)
-        print(f"[ROBOT_CMD] Queued command: {command_str} (queue size will increase)")
-        return {"message": f"Command '{command_str}' queued successfully"}, 200
+        await robot_command_queue.put(command.command)
+        print(f"[ROBOT_CMD] Queued command: {command.command} (queue size will increase)")
+        return JSONResponse({"message": f"Command '{command.command}' queued successfully"})
     except Exception as e:
         print(f"[ROBOT_CMD] Error queueing command: {e}")
         import traceback
         traceback.print_exc()
-        return {"error": f"Failed to queue command: {str(e)}"}, 500
-
-
-@app.post("/move/{direction}")
-async def move_robot(direction: str):
-    """
-    Shortcut endpoints for discrete robot motion commands (forward/back/left/right/stop).
-    """
-    normalized = direction.lower()
-    command_map = {
-        "forward": "forward",
-        "left": "left",
-        "right": "right",
-        "back": "backward",
-        "backward": "backward",
-        "reverse": "backward",
-        "stop": "stop",
-    }
-
-    if normalized not in command_map:
         return JSONResponse(
-            {"error": f"Unsupported move direction '{direction}'"},
-            status_code=400,
+            {"error": f"Failed to queue command: {str(e)}"}, 
+            status_code=500
         )
-
-    command_str = command_map[normalized]
-    payload, status = await _queue_robot_command(command_str, source=f"/move/{direction}")
-    return JSONResponse(payload, status_code=status)
 
 @app.get("/latest-image")
 async def get_latest_image():
     """Returns the latest image from the trajectory directory as base64."""
     try:
-        search_dirs: list[Path] = []
-        global live_frame_session_dir
-
-        if live_frame_session_dir and live_frame_session_dir.exists():
-            search_dirs.append(live_frame_session_dir)
-
-        # Fall back to latest directory in base if current not set
-        if not search_dirs:
-            session_dirs = [p for p in LIVE_FRAMES_BASE_DIR.iterdir() if p.is_dir()]
-            session_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            if session_dirs:
-                search_dirs.append(session_dirs[0])
-
-        if not search_dirs:
-            return JSONResponse({"error": "No live frame directory found"}, status_code=404)
-
-        latest_dir = search_dirs[0]
-        image_candidates = sorted(
-            [
-                path
-                for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp")
-                for path in latest_dir.glob(ext)
-            ]
-        )
-
-        if not image_candidates:
+        trajectory_base_dir = os.path.join(PROJECT_ROOT_DIR, "data/trajectories")
+        epidx_dirs = glob.glob(os.path.join(trajectory_base_dir, "epidx_*/main_agent/rgb"))
+        
+        if not epidx_dirs:
+            return JSONResponse({"error": "No trajectory directory found"}, status_code=404)
+        
+        rgb_dir = max(epidx_dirs, key=os.path.getmtime)
+        jpg_files = sorted(glob.glob(os.path.join(rgb_dir, "*.jpg")))
+        
+        if not jpg_files:
             return JSONResponse({"error": "No images found"}, status_code=404)
-
-        latest_image = image_candidates[-1]
-        img_data = latest_image.read_bytes()
-        mime = "image/png"
-        suffix = latest_image.suffix.lower()
-        if suffix in {".jpg", ".jpeg"}:
-            mime = "image/jpeg"
-        elif suffix == ".webp":
-            mime = "image/webp"
-
+        
+        # Get the latest image
+        latest_image = jpg_files[-1]
+        
+        with open(latest_image, 'rb') as f:
+            img_data = f.read()
+        
         b64_string = base64.b64encode(img_data).decode('utf-8')
-
+        
         return JSONResponse({
-            "image": f"data:{mime};base64,{b64_string}",
-            "filename": latest_image.name,
-            "total_images": len(image_candidates)
+            "image": f"data:image/jpeg;base64,{b64_string}",
+            "filename": os.path.basename(latest_image),
+            "total_images": len(jpg_files)
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

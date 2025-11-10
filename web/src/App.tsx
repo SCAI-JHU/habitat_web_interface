@@ -37,7 +37,8 @@ function App() {
   const imagePollingIntervalRef = useRef<ReturnType<typeof setInterval>>();
   const mockMetricsIntervalRef = useRef<ReturnType<typeof setInterval>>();
 
-  // Helper functions
+  // --- FIX: Wrap all state setters in useCallback ---
+
   const addTerminalLine = useCallback((message: string, type: MessageType = 'info') => {
     const newLine: TerminalLine = {
       id: generateId(),
@@ -47,7 +48,7 @@ function App() {
     };
     setState(prev => ({
       ...prev,
-      terminalLines: [...prev.terminalLines, newLine]
+      terminalLines: [...prev.terminalLines.slice(-100), newLine] // Prune old lines
     }));
   }, []);
 
@@ -60,7 +61,7 @@ function App() {
     };
     setState(prev => ({
       ...prev,
-      systemLogs: [...prev.systemLogs, newLog]
+      systemLogs: [...prev.systemLogs.slice(-100), newLog] // Prune old lines
     }));
   }, []);
 
@@ -89,7 +90,7 @@ function App() {
     }));
   }, []);
 
-  // WebSocket message handler
+  // --- FIX: All dependencies of handleSocketMessage are now stable ---
   const handleSocketMessage = useCallback((message: string) => {
     try {
       if (message.startsWith('data:image/')) {
@@ -121,38 +122,15 @@ function App() {
           updateMetric('memory', value);
         }
       } else {
-        console.log('Received unhandled message:', message);
-        addSystemLog(`Unhandled message: ${message}`, 'DEBUG');
+        // Don't log *every* unhandled message, it's spammy
+        // console.log('Received unhandled message:', message);
       }
     } catch (e) {
       console.error('Error handling message:', e);
       addSystemLog(`Failed to parse message: ${message}`, 'ERROR');
     }
   }, [addTerminalLine, addSystemLog, setStatus, updateImageDisplay, updateMetric]);
-
-  // WebSocket setup (optional - for real-time updates)
-  useWebSocket({
-    onMessage: handleSocketMessage,
-    onOpen: () => {
-      addTerminalLine('WebSocket connected - Real-time updates enabled.', 'success');
-      addSystemLog('WebSocket connected successfully.', 'INFO');
-      setStatus('Connected. Ready to run.', 'info');
-    },
-    onClose: () => {
-      // Silent on close - WebSocket through SSH tunnels is unreliable
-      // The app will work fine with polling instead
-      console.log('WebSocket closed - using polling mode instead');
-      setState(prev => ({ ...prev, isRunning: false }));
-      if (imagePollingIntervalRef.current) {
-        clearInterval(imagePollingIntervalRef.current);
-      }
-    },
-    onError: () => {
-      // Silent on error - not critical for functionality
-      console.log('WebSocket error - continuing without real-time updates');
-    }
-  });
-
+  
   const buildUrl = useCallback(
     (path: string) => (API_BASE ? `${API_BASE}${path}` : path),
     []
@@ -162,21 +140,46 @@ function App() {
   const fetchLatestImage = useCallback(async () => {
     try {
       const response = await fetch(buildUrl('/latest-image'));
+      if (!response.ok) {
+        throw new Error(`Server responded ${response.status}`);
+      }
       const data = await response.json();
 
       if (data.image) {
         updateImageDisplay(data.image);
-        addTerminalLine(`Displaying ${data.filename} (${data.total_images} total images)`, 'info');
       } else {
         updateImageDisplay(null);
       }
     } catch (error) {
       console.error('Failed to fetch latest image:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      addTerminalLine(`Failed to fetch latest image: ${errorMessage}`, 'error');
-      addSystemLog(`Failed to fetch latest image: ${errorMessage}`, 'ERROR');
     }
-  }, [addTerminalLine, addSystemLog, updateImageDisplay, buildUrl]);
+  }, [updateImageDisplay, buildUrl]);
+
+
+  // WebSocket setup
+  useWebSocket({
+    onMessage: handleSocketMessage,
+    onOpen: () => {
+      addTerminalLine('WebSocket connected - Real-time updates enabled.', 'success');
+      addSystemLog('WebSocket connected successfully.', 'INFO');
+      setStatus('Connected. Ready to run.', 'info');
+      // Stop polling once WebSocket is connected
+      if (imagePollingIntervalRef.current) {
+        clearInterval(imagePollingIntervalRef.current);
+      }
+    },
+    onClose: () => {
+      addSystemLog('WebSocket closed. Falling back to polling.', 'WARN');
+      // Fallback to polling if WebSocket closes
+      if (imagePollingIntervalRef.current) {
+        clearInterval(imagePollingIntervalRef.current);
+      }
+      imagePollingIntervalRef.current = setInterval(fetchLatestImage, 1000); // Poll every 1s
+    },
+    onError: () => {
+      addSystemLog('WebSocket error. Falling back to polling.', 'ERROR');
+    }
+  });
 
   // Handle run simulation
   const handleRunSimulation = useCallback(async () => {
@@ -187,16 +190,22 @@ function App() {
     setStatus('Requesting simulation start...', 'running');
     updateImageDisplay(null);
 
+    // Stop polling (if any) when we try to run
+    if (imagePollingIntervalRef.current) {
+      clearInterval(imagePollingIntervalRef.current);
+    }
+
     try {
       const response = await fetch(buildUrl('/run-simulation'), { method: 'POST' });
       const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to start");
+
       console.log('Simulation start request sent:', data.message);
       addTerminalLine(`Simulation start request sent: ${data.message}`, 'success');
       addSystemLog(`Server responded: ${data.message}`, 'INFO');
 
-      if (imagePollingIntervalRef.current) {
-        clearInterval(imagePollingIntervalRef.current);
-      }
+      // Start polling *after* simulation is confirmed running
+      // WebSocket 'onOpen' will clear this if it connects
       imagePollingIntervalRef.current = setInterval(fetchLatestImage, 500);
     } catch (error) {
       console.error('Failed to send start simulation request:', error);
@@ -212,6 +221,11 @@ function App() {
     console.log('Requesting simulation stop...');
     addTerminalLine('Stopping simulation...', 'info');
     addSystemLog('Simulation stop requested by user.', 'INFO');
+
+    // Stop polling
+    if (imagePollingIntervalRef.current) {
+      clearInterval(imagePollingIntervalRef.current);
+    }
 
     try {
       const response = await fetch(buildUrl('/stop-simulation'), { method: 'POST' });
@@ -251,10 +265,6 @@ function App() {
 
   // Handle robot control commands
   const handleRobotCommand = useCallback(async (command: string) => {
-    if (!state.isRunning) {
-      console.log('Sending command even though sim not marked running:', command);
-    }
-
     try {
       let response: Response;
       let data: any;
@@ -274,7 +284,6 @@ function App() {
         });
       }
 
-      // Attempt to parse JSON response for better error messaging
       try {
         data = await response.json();
       } catch {
@@ -282,14 +291,12 @@ function App() {
       }
       
       if (!response.ok) {
-        // Show the actual error message from the server
         const errorMsg = data?.error || response.statusText || 'Unknown error';
         console.error(`Failed to send command "${command}":`, errorMsg);
         addTerminalLine(`Failed to send command "${command}": ${errorMsg}`, 'error');
         return;
       }
       
-      // Success
       console.log(`Command "${command}" sent successfully:`, data?.message || 'OK');
       addTerminalLine(`Robot command: ${command}`, 'info');
     } catch (error) {
@@ -297,7 +304,7 @@ function App() {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       addTerminalLine(`Failed to send robot command "${command}": ${errorMessage}`, 'error');
     }
-  }, [state.isRunning, addTerminalLine, buildUrl]);
+  }, [addTerminalLine, buildUrl]); // Removed state.isRunning dependency
 
   // Initialize app
   useEffect(() => {
@@ -310,10 +317,10 @@ function App() {
     // Mock metrics for demo
     addSystemLog('Starting mock metrics for demo. Remove in production.', 'WARN');
     mockMetricsIntervalRef.current = setInterval(() => {
-      if (!state.isRunning) {
-        updateMetric('cpu', Math.random() * 5);
-        updateMetric('memory', Math.random() * 3 + 10);
-      }
+      // This logic was flawed, updating based on isRunning is tricky.
+      // Let's just update regardless for the demo.
+      updateMetric('cpu', Math.random() * 5);
+      updateMetric('memory', Math.random() * 3 + 10);
     }, 1000);
 
     return () => {
@@ -324,7 +331,8 @@ function App() {
         clearInterval(mockMetricsIntervalRef.current);
       }
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on mount
 
   return (
     <div className="font-sans m-0 bg-gray-900 text-gray-200 flex h-screen overflow-hidden">
@@ -358,4 +366,3 @@ function App() {
 }
 
 export default App;
-

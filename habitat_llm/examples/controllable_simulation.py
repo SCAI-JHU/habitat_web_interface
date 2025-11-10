@@ -88,13 +88,17 @@ def send_current_rgb_frame(env_interface, obs_dict=None, label=""):
         print("[FRAME] No observations returned from simulator", flush=True)
         return
 
+    print(f"[DEBUG] Available sensor keys: {list(obs_dict.keys())}", flush=True)
+
     # Try common RGB sensor keys
     possible_rgb_keys = [
-        "head_rgb_sensor",
-        "head_rgb",
+        "articulated_agent_jaw_rgb",  # <-- Try this first (often main nav camera for Spot)
+        "head_rgb",                   # <-- Second best option
+        "articulated_agent_arm_rgb",  # <-- Good if you are moving the arm
+        "third_rgb",                  # <-- Likely static, keep last as fallback
         "rgb",
-        "third_rgb",
     ]
+    
     rgb_frame = None
     for key in possible_rgb_keys:
         if key in obs_dict:
