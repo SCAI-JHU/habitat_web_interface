@@ -192,18 +192,18 @@ def keyboard_control(robot_name='spot', save_frames=True, camera_preference='thi
             # Get keyboard input
             key = getch().lower()
             
-            # Map keys to velocities
+            # Map keys to velocities (increased for bigger steps)
             if key == 'w':
-                current_velocity = [1.0, 0.0]
+                current_velocity = [3.0, 0.0]
                 print("⬆️  Forward")
             elif key == 's':
-                current_velocity = [-0.5, 0.0]
+                current_velocity = [-2.0, 0.0]
                 print("⬇️  Backward")
             elif key == 'a':
-                current_velocity = [0.0, 1.0]
+                current_velocity = [0.0, 2.0]
                 print("⬅️  Turn Left")
             elif key == 'd':
-                current_velocity = [0.0, -1.0]
+                current_velocity = [0.0, -2.0]
                 print("➡️  Turn Right")
             elif key == ' ':
                 current_velocity = [0.0, 0.0]

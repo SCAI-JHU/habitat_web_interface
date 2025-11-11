@@ -1,0 +1,82 @@
+================================================================================
+ROBOT CONTROL GUIDE
+================================================================================
+
+This guide explains how to control the Spot/Stretch robots in Habitat-Lab.
+
+================================================================================
+KEYBOARD CONTROL (Interactive + Video Recording)
+================================================================================
+
+This is the working method that saves camera frames from the robot.
+
+STEP 1: Get a GPU node
+----------------------
+srun --pty --partition=myl --gres=gpu:1 --mem=100G -t 0-01:00 /bin/bash
+
+STEP 2: Activate environment
+----------------------------
+source /scratch/tshu2/yyin34/projects/3d_belief/miniconda3/etc/profile.d/conda.sh
+conda activate dfm-pixel-habitat
+
+STEP 3: Set library path
+------------------------
+export LD_LIBRARY_PATH=/scratch/tshu2/yyin34/projects/3d_belief/miniconda3/envs/dfm-pixel-habitat/lib:$LD_LIBRARY_PATH
+
+STEP 4: Run the keyboard control
+--------------------------------
+cd /home/kli95/scratchtshu2/kli95/partnr-planner
+
+# For Spot with arm camera (recommended)
+python -m habitat_llm.examples.robot_keyboard_control --robot spot --camera arm
+
+# For Spot with third-person view
+python -m habitat_llm.examples.robot_keyboard_control --robot spot --camera third
+
+# For Stretch
+python -m habitat_llm.examples.robot_keyboard_control --robot stretch --camera arm
+
+STEP 5: Control the robot
+-------------------------
+Controls:
+  W - Forward (3x speed)
+  S - Backward (2x speed)
+  A - Turn Left (2x speed)
+  D - Turn Right (2x speed)
+  SPACE - Stop
+  P - Print current position
+  Q - Quit
+
+Note: Step sizes have been increased for faster movement!
+
+STEP 6: Find your recordings
+----------------------------
+Frames are saved to:
+  data/robot_control_recordings/{robot}_{timestamp}/rgb/
+
+To create a video from frames:
+  cd data/robot_control_recordings/{robot}_{timestamp}/rgb/
+  ffmpeg -framerate 10 -pattern_type glob -i '*.png' -c:v libx264 -pix_fmt yuv420p output.mp4
+
+================================================================================
+CAMERA OPTIONS
+================================================================================
+
+--camera arm       Robot's arm camera (moves with robot) - RECOMMENDED
+--camera jaw       Robot's jaw/gripper camera
+--camera third     High overhead third-person view (floating camera)
+--camera head      Robot's head camera
+--camera auto      Automatically selects best available camera
+
+================================================================================
+NOTES
+================================================================================
+
+- The script automatically saves frames as PNG images
+- Use the arm camera to see what the robot sees from its perspective
+- Use the third camera for a better overview of the environment
+- Frames are saved with timestamps so each run creates a new directory
+- The script runs without world graph initialization (init_wg=False) to avoid errors
+
+================================================================================
+

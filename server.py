@@ -40,7 +40,7 @@ PROJECT_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Check if React build exists, otherwise use web directory
 WEB_DIST_DIR = os.path.join(PROJECT_ROOT_DIR, "web", "dist")
 WEB_DIR = WEB_DIST_DIR if os.path.exists(WEB_DIST_DIR) else os.path.join(PROJECT_ROOT_DIR, "web")
-SIMULATION_SCRIPT = "habitat_llm/examples/controllable_simulation.py"
+SIMULATION_SCRIPT = "habitat_llm/examples/web_robot_control.py"
 
 # --- Live frame storage configuration ---
 LIVE_FRAMES_BASE_DIR = Path(PROJECT_ROOT_DIR) / "data" / "live_frames"

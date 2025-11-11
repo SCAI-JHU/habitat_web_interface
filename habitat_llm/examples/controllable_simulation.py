@@ -90,12 +90,12 @@ def send_current_rgb_frame(env_interface, obs_dict=None, label=""):
 
     print(f"[DEBUG] Available sensor keys: {list(obs_dict.keys())}", flush=True)
 
-    # Try common RGB sensor keys
+    # Try common RGB sensor keys - prioritize cameras on Spot's body
     possible_rgb_keys = [
-        "articulated_agent_jaw_rgb",  # <-- Try this first (often main nav camera for Spot)
-        "head_rgb",                   # <-- Second best option
-        "articulated_agent_arm_rgb",  # <-- Good if you are moving the arm
-        "third_rgb",                  # <-- Likely static, keep last as fallback
+        "articulated_agent_arm_rgb",  # <-- Arm camera on Spot (user preferred)
+        "articulated_agent_jaw_rgb",  # <-- Jaw camera on Spot
+        "head_rgb",                   # <-- Head camera
+        "third_rgb",                  # <-- Third person (floating camera)
         "rgb",
     ]
     
