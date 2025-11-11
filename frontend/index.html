@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habitat Robot Control</title>
+    <!-- We will load the socket.io client library -->
+    <script src="socket.io.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            background-color: #282c34;
+            color: white;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        .App {
+            text-align: center;
+        }
+
+        .App-header {
+            padding: 20px;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 40px;
+        }
+
+        .App-header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .status-light-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-light {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: #f44336; /* Red */
+            border: 2px solid #fff;
+            transition: all 0.3s ease;
+        }
+
+        .status-light.connected {
+            background-color: #4CAF50; /* Green */
+            box-shadow: 0 0 10px #4CAF50;
+        }
+
+        .App-main {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            gap: 30px;
+        }
+
+        .video-container {
+            width: 90%;
+            max-width: 800px;
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            aspect-ratio: 16 / 9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .video-placeholder {
+            color: #888;
+        }
+
+        .controls-container {
+            background-color: #3a3f4a;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+            user-select: none; /* Prevent text selection */
+        }
+
+        .button-grid button, .stop-button {
+            padding: 20px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            background-color: #61dafb;
+            color: #282c34;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+
+        .button-grid button:hover {
+            background-color: #fff;
+        }
+
+        .button-grid button:active {
+            transform: translateY(2px);
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
+        }
+
+        .stop-button {
+            background-color: #f44336;
+            color: white;
+            width: 100%;
+        }
+
+        .stop-button:hover {
+            background-color: #e53935;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="App">
+        <header class="App-header">
+            <h1>Habitat Robot Control</h1>
+            <div class="status-light-container">
+                <div id="status-light" class="status-light"></div>
+                <p id="status-text">Disconnected</p>
+            </div>
+        </header>
+        <main class="App-main">
+            <div class="video-container">
+                <img id="video-feed" src="" alt="Robot View" style="display: none;" />
+                <div id="video-placeholder" class="video-placeholder">
+                    <p>Waiting for video feed...</p>
+                </div>
+            </div>
+            <div class="controls-container">
+                <p>Use WASD or Arrow Keys to move</p>
+                <div class="button-grid">
+                    <div></div>
+                    <button id="btn-w">W (Up)</button>
+                    <div></div>
+                    <button id="btn-a">A (Left)</button>
+                    <button id="btn-s">S (Down)</button>
+                    <button id="btn-d">D (Right)</button>
+                </div>
+                <button id="btn-stop" class="stop-button">SPACE (STOP)</button>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Elements ---
+            const videoFeed = document.getElementById('video-feed');
+            const videoPlaceholder = document.getElementById('video-placeholder');
+            const statusLight = document.getElementById('status-light');
+            const statusText = document.getElementById('status-text');
+            const buttons = {
+                'w': document.getElementById('btn-w'),
+                'a': document.getElementById('btn-a'),
+                's': document.getElementById('btn-s'),
+                'd': document.getElementById('btn-d'),
+                ' ': document.getElementById('btn-stop')
+            };
+            
+            // --- WebSocket Connection ---
+            const SERVER_URL = 'http://127.0.0.1:5050';
+            console.log('Connecting to server...');
+            const socket = io(SERVER_URL);
+
+            socket.on('connect', () => {
+                console.log('Connected to server!');
+                statusLight.classList.add('connected');
+                statusText.textContent = 'Connected';
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from server.');
+                statusLight.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+            });
+
+            socket.on('video_frame', (data) => {
+                // Received a new frame, update the image src
+                videoFeed.src = data.frame;
+                // Show image and hide placeholder
+                if (videoFeed.style.display === 'none') {
+                    videoFeed.style.display = 'block';
+                    videoPlaceholder.style.display = 'none';
+                }
+            });
+            
+            socket.on('connect_error', (err) => {
+                console.error('Connection error:', err.message);
+            });
+
+            // --- Control Logic ---
+            const sendControl = (key) => {
+                if (socket.connected) {
+                    console.log(`Sending key: ${key}`);
+                    socket.emit('control', { key: key });
+                } else {
+                    console.warn('Not connected, cannot send control.');
+                }
+            };
+            
+            // Mouse controls (send 'stop' on mouse up)
+            Object.keys(buttons).forEach(key => {
+                if(buttons[key]) {
+                    buttons[key].addEventListener('mousedown', () => sendControl(key));
+                    if(key !== ' ') {
+                        buttons[key].addEventListener('mouseup', () => sendControl(' '));
+                        buttons[key].addEventListener('mouseleave', () => sendControl(' '));
+                    }
+                }
+            });
+            
+            // Keyboard controls (send 'stop' on key up)
+            const keyMap = {
+                'w': 'w', 's': 's', 'a': 'a', 'd': 'd',
+                'ArrowUp': 'w', 'ArrowDown': 's', 'ArrowLeft': 'a', 'ArrowRight': 'd',
+                ' ': ' '
+            };
+            
+            const activeKeys = new Set();
+
+            window.addEventListener('keydown', (e) => {
+                if (e.key in keyMap) {
+                    e.preventDefault();
+                    const key = keyMap[e.key];
+                    if (!activeKeys.has(key)) {
+                        activeKeys.add(key);
+                        sendControl(key);
+                    }
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                if (e.key in keyMap) {
+                    e.preventDefault();
+                    const key = keyMap[e.key];
+                    activeKeys.delete(key);
+                    // Send stop, unless another move key is still held down
+                    if (key !== ' ' && !Array.from(activeKeys).some(k => k !== ' ')) {
+                         sendControl(' ');
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
