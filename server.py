@@ -114,5 +114,5 @@ if __name__ == '__main__':
     if simulator is None:
         print("Not starting server because simulator failed to initialize.")
     else:
-        print("Starting Flask-SocketIO server on http://127.0.0.1:5000")
+        print("Starting Flask-SocketIO server on http://127.0.0.1:5050")
         socketio.run(app, host='127.0.0.1', port=5000)
