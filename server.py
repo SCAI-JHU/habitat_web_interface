@@ -35,7 +35,8 @@ socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
 print("Starting Robot Simulator... This may take a minute.")
 try:
     # Use the same settings you used from the command line
-    simulator = RobotSimulator(robot_name='stretch', camera_preference='arm')
+    # Set camera preference to head and robot to stretch
+    simulator = RobotSimulator(robot_name='stretch', camera_preference='head')
     print("✅ Robot Simulator is ready.")
 except Exception as e:
     print(f"❌ FAILED TO INITIALIZE SIMULATOR: {e}")
